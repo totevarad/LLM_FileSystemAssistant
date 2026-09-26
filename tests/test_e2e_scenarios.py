@@ -74,3 +74,26 @@ def test_e2e_scenario3_create_summary_file():
         # Clean up output file after test assertion to keep test runs idempotent
         if os.path.exists(target_output_file):
             os.remove(target_output_file)
+
+
+def test_e2e_keyword_not_found_explicit():
+    """Verify that searching for a non-existent skill explicitly states it was not found."""
+    query = "Find all resumes that mention Rust and tell me where they worked."
+    response = run_query(query)
+
+    assert isinstance(response, str)
+    lower = response.lower()
+    assert "not found" in lower or "no resumes" in lower or "none of the resumes" in lower or "no candidate" in lower
+
+
+def test_e2e_keyword_spelling_mistake_corrected():
+    """Verify that a misspelled keyword ('Pythn') is recognized, corrected, and matching candidates are returned."""
+    query = "Find all resumes that mention Pythn and tell me where they worked."
+    response = run_query(query)
+
+    assert isinstance(response, str)
+    lower = response.lower()
+    # Check that Python was recognized / searched and candidates returned
+    assert "python" in lower or "pythn" in lower
+    assert "john" in lower or "michael" in lower or "chang" in lower or "acme" in lower
+

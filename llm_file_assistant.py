@@ -432,19 +432,20 @@ def dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
 
     if not name or not isinstance(name, str):
         err = "Dispatch error: tool name must be a non-empty string."
+        logger.warning("    [TOOL RESULT] status=FAILED | time=0.00ms | %s | tool='%s'", err, name)
         logger.info("tool_call: name='%s' success=False duration_ms=0.00 args=%s error='%s'", name, arguments, err)
         return {"success": False, "error": err}
 
     if name not in TOOL_REGISTRY:
         available = ", ".join(sorted(TOOL_REGISTRY.keys()))
         err = f"Unknown tool '{name}'. Available tools are: {available}."
-        logger.warning("Dispatcher rejected tool name: %s", err)
+        logger.warning("    [TOOL RESULT] status=FAILED | time=0.00ms | %s | tool='%s'", err, name)
         logger.info("tool_call: name='%s' success=False duration_ms=0.00 args=%s error='%s'", name, arguments, err)
         return {"success": False, "error": err}
 
     if not isinstance(arguments, dict):
         err = f"Dispatch error: arguments for '{name}' must be a dictionary, got {type(arguments).__name__}."
-        logger.warning(err)
+        logger.warning("    [TOOL RESULT] status=FAILED | time=0.00ms | %s | tool='%s'", err, name)
         logger.info("tool_call: name='%s' success=False duration_ms=0.00 args=%s error='%s'", name, arguments, err)
         return {"success": False, "error": err}
 
@@ -453,9 +454,11 @@ def dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
     missing = [param for param in required if param not in arguments or arguments[param] is None]
     if missing:
         err = f"Missing required argument(s) for '{name}': {', '.join(missing)}."
-        logger.warning("Dispatcher argument validation failed: %s", err)
+        logger.warning("    [TOOL RESULT] status=FAILED | time=0.00ms | %s | tool='%s'", err, name)
         logger.info("tool_call: name='%s' success=False duration_ms=0.00 args=%s error='%s'", name, arguments, err)
         return {"success": False, "error": err}
+
+    logger.info("    [TOOL DISPATCH] tool='%s' | args=%s", name, arguments)
 
     # Dispatch to tool function
     target_func = TOOL_REGISTRY[name]
@@ -468,6 +471,28 @@ def dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
         result = target_func(**valid_kwargs)
         duration_ms = (time.perf_counter() - start_time) * 1000
         success = result.get("success", True) if isinstance(result, dict) else True
+
+        if not success:
+            summary = f"Error: {result.get('error', 'Operation failed')}"
+        elif name == "list_files" and isinstance(result, list):
+            summary = f"Found {len(result)} files"
+        elif name == "read_file" and isinstance(result, dict):
+            char_count = len(result.get("content") or "")
+            summary = f"Read {char_count} chars from '{result.get('filename', '')}'"
+        elif name == "write_file" and isinstance(result, dict):
+            summary = f"Wrote {result.get('bytes_written', 0)} bytes to '{result.get('filepath', '')}'"
+        elif name == "search_in_file" and isinstance(result, dict):
+            summary = f"Found {result.get('match_count', 0)} match(es) for '{result.get('keyword', '')}'"
+        else:
+            summary = "SUCCESS"
+
+        logger.info(
+            "    [TOOL RESULT] status=%s | time=%.2fms | %s | tool='%s'",
+            "SUCCESS" if success else "FAILED",
+            duration_ms,
+            summary,
+            name,
+        )
         logger.info(
             "tool_call: name='%s' success=%s duration_ms=%.2f args=%s",
             name,
@@ -480,7 +505,8 @@ def dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
     except Exception as exc:
         duration_ms = (time.perf_counter() - start_time) * 1000
         err = f"Unexpected execution error during dispatch of '{name}': {str(exc)}"
-        logger.exception(err)
+        logger.warning("    [TOOL RESULT] status=FAILED | time=%.2fms | %s | tool='%s'", duration_ms, err, name)
+        logger.debug("Tool dispatch exception details", exc_info=True)
         logger.info(
             "tool_call: name='%s' success=False duration_ms=%.2f args=%s error='%s'",
             name,
@@ -501,9 +527,13 @@ You have access to the following filesystem tools:
 
 Guidelines:
 - When asked about files in a folder, inspect the folder first using `list_files`.
+- Keyword Search & Candidate Filtering:
+  * Typo and Spelling Correction: If the user's query contains a spelling mistake or typo in a technical keyword, skill, or name (e.g., 'Pythn' -> 'Python', 'Kubernets' -> 'Kubernetes', 'Djngo' -> 'Django', 'Reat' -> 'React'), identify the intended keyword, explicitly state to the user that you corrected the spelling mistake, and search using the corrected keyword.
+  * Explicit Not-Found Status: When searching for resumes matching a skill, keyword, or criterion, if no resumes match (or match_count is 0 across all files), state clearly and explicitly: "No resumes were found mentioning '<keyword>'." Never hallucinate matches, never remain silent, and do not provide an ambiguous response.
 - Synthesize clear, human-readable answers from tool outputs.
 - Never output raw unformatted JSON dumps unless explicitly requested by the user.
 - If a tool reports an error (e.g., file not found), explain the issue helpfully.
+- When requested to create or save a summary or report to a file, generate the content and invoke `write_file` with the destination filepath.
 """
 
 
@@ -549,7 +579,7 @@ class Session:
         )
 
 
-MAX_TOOL_ITERATIONS: int = int(os.environ.get("MAX_TOOL_ITERATIONS", 10))
+MAX_TOOL_ITERATIONS: int = int(os.environ.get("MAX_TOOL_ITERATIONS", 25))
 
 
 def run_query(
@@ -600,29 +630,39 @@ def run_query(
         ]
 
     schemas = get_tool_schemas()
-    logger.info("Starting tool-call loop for query: '%s' (max_iterations=%d)", user_query, limit)
+    turn_start_time = time.perf_counter()
+
+    logger.info("=" * 70)
+    logger.info("[TURN START] User Query: \"%s\"", user_query)
+    logger.info("=" * 70)
 
     iteration = 0
     while iteration < limit:
         iteration += 1
-        logger.info("Executing tool loop iteration %d/%d", iteration, limit)
+        model_name = getattr(active_provider, "model", "default")
+        logger.info("  [STEP %d] LLM INVOCATION --> Sending %d messages to model '%s'...", iteration, len(messages), model_name)
 
         response = active_provider.send(messages=list(messages), tools=schemas)
 
         # If no tool calls requested, we have reached convergence / final answer
         if not response.has_tool_calls:
-            logger.info("Loop converged on iteration %d with final answer.", iteration)
+            total_elapsed = time.perf_counter() - turn_start_time
+            logger.info("  [FINAL SYNTHESIS] Loop converged on iteration %d with final answer.", iteration)
+            logger.info("=" * 70)
+            logger.info("[TURN COMPLETE] Status: CONVERGED | Iterations: %d | Total Time: %.2fs", iteration, total_elapsed)
+            logger.info("=" * 70)
             final_content = response.content or ""
             if session is not None:
                 session.add_assistant_message(content=final_content)
             return final_content
 
         assert response.tool_calls is not None
+        call_names = [tc.name for tc in response.tool_calls]
         logger.info(
-            "Iteration %d: LLM requested %d tool call(s): %s",
+            "  [STEP %d] LLM TOOL REQUEST --> %d tool call(s) requested: %s",
             iteration,
             len(response.tool_calls),
-            [tc.name for tc in response.tool_calls],
+            call_names,
         )
 
         formatted_tool_calls = [
@@ -673,11 +713,14 @@ def run_query(
                 )
 
     # Cutoff guard reached
+    total_elapsed = time.perf_counter() - turn_start_time
     cutoff_msg = (
         f"The assistant reached the maximum allowed tool iterations ({limit}) "
         "without completing the request. Please refine or break down your query."
     )
-    logger.warning("Tool loop terminated: %s", cutoff_msg)
+    logger.warning("=" * 70)
+    logger.warning("[TURN COMPLETE] Status: MAX_ITERATIONS_EXCEEDED (%d) | Total Time: %.2fs", limit, total_elapsed)
+    logger.warning("=" * 70)
     if session is not None:
         session.add_assistant_message(content=cutoff_msg)
     return cutoff_msg

@@ -578,6 +578,65 @@ def test_audit_log_file_written_to_disk():
     assert "tool_call:" in content or "list_files" in content
 
 
+# ============================================================================
+# Feedback 1 Tests: Keyword Not Found & Typo Correction
+# ============================================================================
+
+def test_system_prompt_contains_typo_correction_and_not_found_rules():
+    """Verify DEFAULT_SYSTEM_PROMPT includes rules for typo correction and explicit not-found status."""
+    assert "Typo and Spelling Correction" in DEFAULT_SYSTEM_PROMPT
+    assert "Explicit Not-Found Status" in DEFAULT_SYSTEM_PROMPT
+    assert "No resumes were found" in DEFAULT_SYSTEM_PROMPT
+
+
+def test_loop_handles_keyword_not_found_explicitly():
+    """Verify assistant produces explicit not-found answer when tool search finds 0 matches."""
+    mock_provider = MagicMock()
+
+    # Turn 1: Model requests search_in_file for a non-existent skill 'Cobol'
+    turn1 = LLMResponse(
+        content="",
+        tool_calls=[
+            ToolCallRequest(
+                id="tc_search",
+                name="search_in_file",
+                arguments={"filepath": "resumes/sample.txt", "keyword": "Cobol"},
+            )
+        ],
+    )
+    # Turn 2: Model receives 0 matches and explicitly responds that Cobol was not found
+    turn2 = LLMResponse(
+        content="No resumes were found mentioning 'Cobol'. Checked candidate resumes and found 0 occurrences.",
+        tool_calls=None,
+    )
+
+    mock_provider.send.side_effect = [turn1, turn2]
+
+    response = run_query("Find all resumes mentioning Cobol", provider=mock_provider)
+
+    assert "No resumes were found" in response or "not found" in response.lower()
+    assert "Cobol" in response
+    assert mock_provider.send.call_count == 2
+
+
+def test_turn_lifecycle_logging_markers(caplog):
+    """Verify turn lifecycle logs emit visual markers: [TURN START], [STEP 1], and [TURN COMPLETE]."""
+    mock_provider = MagicMock()
+    mock_provider.send.return_value = LLMResponse(content="Final synthesized result.")
+
+    with caplog.at_level("INFO", logger="llm_file_assistant"):
+        ans = run_query("Test lifecycle logging", provider=mock_provider)
+
+    assert ans == "Final synthesized result."
+    messages = [r.message for r in caplog.records if r.name == "llm_file_assistant"]
+
+    assert any("[TURN START]" in m for m in messages)
+    assert any("[STEP 1] LLM INVOCATION" in m for m in messages)
+    assert any("[TURN COMPLETE] Status: CONVERGED" in m for m in messages)
+
+
+
+
 
 
 

@@ -320,7 +320,8 @@ def read_file(filepath: str, base_dir: Optional[Union[str, Path]] = None) -> Dic
     except Exception as exc:
         duration_ms = (time.perf_counter() - start_time) * 1000
         err = f"Error reading file '{filepath}': {str(exc)}"
-        logger.exception("read_file failed in %.2fms: %s", duration_ms, err)
+        logger.warning("read_file failed in %.2fms: %s", duration_ms, err)
+        logger.debug("read_file failure details", exc_info=True)
         return {
             "success": False,
             "filepath": filepath,
@@ -496,7 +497,8 @@ def write_file(
     except Exception as exc:
         duration_ms = (time.perf_counter() - start_time) * 1000
         err = f"Error writing file '{filepath}': {str(exc)}"
-        logger.exception("write_file failed in %.2fms: %s", duration_ms, err)
+        logger.warning("write_file failed in %.2fms: %s", duration_ms, err)
+        logger.debug("write_file failure details", exc_info=True)
         return {
             "success": False,
             "filepath": filepath,
