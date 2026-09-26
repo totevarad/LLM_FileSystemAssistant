@@ -1,0 +1,27 @@
+John Doe
+Software Engineer
+Email: john.doe@example.com | Phone: (555) 123-4567 | Location: San Francisco, CA
+LinkedIn: linkedin.com/in/johndoe | GitHub: github.com/johndoe
+
+Summary:
+Experienced Full Stack Software Engineer with over 6 years of expertise building scalable web applications, distributed systems, and data pipelines. Strong background in Python, Go, and cloud architectures.
+
+Professional Experience:
+Senior Backend Engineer | Acme Tech Solutions (2021 - Present)
+- Architected and deployed microservices handling 50M+ requests daily using Python and FastAPI.
+- Reduced database query latency by 40% through Redis caching and PostgreSQL query optimization.
+- Led the migration of legacy monolithic services into Docker containers orchestrated on AWS ECS.
+
+Software Engineer | Innovate Corp (2018 - 2021)
+- Developed RESTful APIs and real-time streaming services in Python and Django.
+- Collaborated with front-end engineers to implement React-based dashboards.
+- Implemented comprehensive automated testing using pytest, achieving 90% code coverage.
+
+Education:
+Bachelor of Science in Computer Science
+University of California, Berkeley (2014 - 2018)
+
+Technical Skills:
+- Languages: Python, Go, JavaScript, TypeScript, SQL
+- Frameworks: FastAPI, Django, Flask, React, Node.js
+- Tools & Cloud: Docker, Kubernetes, AWS, Git, Redis, PostgreSQL, Linux
