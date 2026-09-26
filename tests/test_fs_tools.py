@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime
 import pytest
 
-from fs_tools import read_file
+from fs_tools import read_file, list_files
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -262,3 +262,142 @@ def test_read_file_never_raises():
             assert "success" in res
         except Exception as exc:
             pytest.fail(f"read_file({inp!r}) raised unhandled exception: {exc}")
+
+
+# ============================================================================
+# Phase 3: list_files tests
+# ============================================================================
+
+EXPECTED_LIST_FILES_KEYS = {
+    "name",
+    "filepath",
+    "extension",
+    "size_bytes",
+    "modified_time",
+}
+
+
+def test_list_files_all():
+    """Verify listing all files in a directory returns structured entries with expected keys."""
+    res = list_files("resumes")
+    assert isinstance(res, list)
+    assert len(res) >= 3  # sample.docx, sample.pdf, sample.txt
+
+    for entry in res:
+        assert set(entry.keys()) == EXPECTED_LIST_FILES_KEYS
+        assert entry["name"] in {"sample.docx", "sample.pdf", "sample.txt"}
+        assert entry["size_bytes"] > 0
+        assert entry["extension"].startswith(".")
+        assert datetime.fromisoformat(entry["modified_time"]) is not None
+
+
+def test_list_files_filtered_by_extension():
+    """Verify filtering files by extension returns only matching files."""
+    res_pdf = list_files("resumes", extension=".pdf")
+    assert len(res_pdf) >= 1
+    assert all(item["extension"] == ".pdf" for item in res_pdf)
+    assert any(item["name"] == "sample.pdf" for item in res_pdf)
+
+    res_txt = list_files("resumes", extension=".txt")
+    assert len(res_txt) >= 1
+    assert all(item["extension"] == ".txt" for item in res_txt)
+    assert any(item["name"] == "sample.txt" for item in res_txt)
+
+
+def test_list_files_case_insensitive_and_no_dot():
+    """Verify extension filtering works with or without leading dot and regardless of case."""
+    dot_lower = list_files("resumes", extension=".pdf")
+    no_dot_lower = list_files("resumes", extension="pdf")
+    dot_upper = list_files("resumes", extension=".PDF")
+    no_dot_upper = list_files("resumes", extension="PDF")
+
+    assert dot_lower == no_dot_lower == dot_upper == no_dot_upper
+
+
+def test_list_files_empty_directory(tmp_path):
+    """Verify listing an empty directory returns an empty list."""
+    empty_dir = tmp_path / "empty_dir"
+    empty_dir.mkdir()
+    res = list_files(str(empty_dir))
+    assert res == []
+
+
+def test_list_files_missing_directory():
+    """Verify listing a non-existent directory returns an empty list without raising."""
+    res = list_files("path/to/definitely/missing/dir_12345")
+    assert res == []
+
+
+def test_list_files_ignores_subdirectories(tmp_path):
+    """Verify subdirectories and nested files are excluded from the top-level list."""
+    root_dir = tmp_path / "scan_test"
+    root_dir.mkdir()
+
+    # Create root files
+    (root_dir / "file_a.txt").write_text("aaa")
+    (root_dir / "file_b.pdf").write_text("bbb")
+
+    # Create nested subdirectory with an internal file
+    nested_dir = root_dir / "subdir"
+    nested_dir.mkdir()
+    (nested_dir / "nested_file.txt").write_text("ccc")
+
+    res = list_files(str(root_dir))
+    names = [item["name"] for item in res]
+
+    assert "file_a.txt" in names
+    assert "file_b.pdf" in names
+    assert "subdir" not in names
+    assert "nested_file.txt" not in names
+    assert len(res) == 2
+
+
+def test_list_files_deterministic_sorting(tmp_path):
+    """Verify that listed files are always sorted alphabetically by filename."""
+    test_dir = tmp_path / "sort_test"
+    test_dir.mkdir()
+
+    # Create files in arbitrary order
+    (test_dir / "zebra.txt").write_text("z")
+    (test_dir / "apple.txt").write_text("a")
+    (test_dir / "banana.txt").write_text("b")
+    (test_dir / "mango.txt").write_text("m")
+
+    res = list_files(str(test_dir))
+    names = [item["name"] for item in res]
+
+    assert names == ["apple.txt", "banana.txt", "mango.txt", "zebra.txt"]
+
+
+def test_list_files_file_passed_as_directory(tmp_path):
+    """Verify passing a file path instead of a directory returns an empty list without raising."""
+    some_file = tmp_path / "regular_file.txt"
+    some_file.write_text("content")
+
+    res = list_files(str(some_file))
+    assert res == []
+
+
+@pytest.mark.parametrize("invalid_input", ["", None, 12345, [], {}])
+def test_list_files_invalid_inputs(invalid_input):
+    """Verify non-string or empty directory arguments return empty list without raising."""
+    res = list_files(invalid_input)
+    assert res == []
+
+
+def test_list_files_never_raises():
+    """Verify that list_files never raises an unhandled exception for pathological inputs."""
+    bad_inputs = [
+        "",
+        None,
+        "CON",
+        "invalid://path??",
+        "C:/non_existent_drive_z:/folder",
+    ]
+    for inp in bad_inputs:
+        try:
+            res = list_files(inp)
+            assert isinstance(res, list)
+        except Exception as exc:
+            pytest.fail(f"list_files({inp!r}) raised unhandled exception: {exc}")
+

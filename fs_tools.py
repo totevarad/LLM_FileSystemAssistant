@@ -183,8 +183,70 @@ def read_file(filepath: str) -> Dict[str, Any]:
 
 
 def list_files(directory: str, extension: Optional[str] = None) -> List[Dict[str, Any]]:
-    """List files in the specified directory, optionally filtered by extension."""
-    raise NotImplementedError("Phase 3 implementation pending")
+    """List files in the specified directory, optionally filtered by extension.
+
+    Parameters:
+        directory (str): Path to the target directory.
+        extension (Optional[str]): Optional file extension to filter by (e.g. '.pdf', 'txt', 'DOCX').
+            Case-insensitive and tolerates with or without leading dot.
+
+    Returns:
+        List[Dict[str, Any]]: Deterministically sorted list of dictionaries for matching files.
+            Each dictionary contains:
+                - name (str): File name including extension.
+                - filepath (str): Path to the file.
+                - extension (str): Lowercase file extension (e.g. '.pdf').
+                - size_bytes (int): Size of the file in bytes.
+                - modified_time (str): Last modified timestamp in ISO 8601 format.
+            Returns an empty list if directory is missing, empty, invalid, or inaccessible.
+    """
+    if not directory or not isinstance(directory, str):
+        return []
+
+    dir_path = Path(directory)
+
+    try:
+        if not dir_path.exists() or not dir_path.is_dir():
+            return []
+
+        target_ext = None
+        if extension is not None:
+            if not isinstance(extension, str):
+                return []
+            clean_ext = extension.strip().lower()
+            if clean_ext:
+                target_ext = clean_ext if clean_ext.startswith(".") else f".{clean_ext}"
+
+        matched_files: List[Dict[str, Any]] = []
+
+        for item in dir_path.iterdir():
+            # Skip subdirectories, non-files, and hidden files (starting with '.')
+            if not item.is_file() or item.name.startswith("."):
+                continue
+
+            item_ext = item.suffix.lower()
+            if target_ext is not None and item_ext != target_ext:
+                continue
+
+            stat = item.stat()
+            rel_or_full = str(dir_path / item.name).replace("\\", "/")
+
+            matched_files.append(
+                {
+                    "name": item.name,
+                    "filepath": rel_or_full,
+                    "extension": item_ext,
+                    "size_bytes": stat.st_size,
+                    "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                }
+            )
+
+        # Deterministically sort alphabetically by filename
+        matched_files.sort(key=lambda x: x["name"].lower())
+        return matched_files
+
+    except Exception:
+        return []
 
 
 def write_file(filepath: str, content: str) -> Dict[str, Any]:
