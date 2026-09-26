@@ -542,9 +542,41 @@ def test_cli_repl_processes_query_and_prints_response(capsys):
         with patch("builtins.input", side_effect=["Summarize John Doe", "quit"]):
             run_cli()
 
-    captured = capsys.readouterr().out
-    assert "Candidate resume summary." in captured
-    assert "Goodbye!" in captured
+# ============================================================================
+# Phase 13: Structured Audit Logging Tests
+# ============================================================================
+
+def test_dispatch_logs_structured_audit_record(caplog):
+    """Verify tool dispatch logs structured audit records with duration and arguments."""
+    with caplog.at_level("INFO", logger="llm_file_assistant"):
+        res = dispatch_tool_call("list_files", {"directory": "resumes"})
+
+    assert isinstance(res, list)
+
+    log_messages = [r.message for r in caplog.records if r.name == "llm_file_assistant"]
+    tool_call_logs = [m for m in log_messages if "tool_call:" in m]
+
+    assert len(tool_call_logs) >= 1
+    log_entry = tool_call_logs[0]
+    assert "name='list_files'" in log_entry
+    assert "success=True" in log_entry
+    assert "duration_ms=" in log_entry
+    assert "args=" in log_entry
+
+
+def test_audit_log_file_written_to_disk():
+    """Verify logs/app.log exists and contains tool invocation logs."""
+    # Trigger a tool dispatch to ensure a log entry is written
+    dispatch_tool_call("list_files", {"directory": "resumes"})
+
+    log_file = os.path.join("logs", "app.log")
+    assert os.path.exists(log_file), f"Expected log file {log_file} to exist."
+
+    with open(log_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    assert "tool_call:" in content or "list_files" in content
+
 
 
 

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sys
+import time
 from typing import Optional, List, Dict, Any
 
 import dotenv
@@ -18,9 +19,41 @@ import dotenv
 # Load environment variables from .env
 dotenv.load_dotenv()
 
+LOG_FILE_PATH = os.path.join("logs", "app.log")
+
+
+def setup_logging(log_path: str = LOG_FILE_PATH, level: int = logging.INFO) -> None:
+    """Configure structured audit logging to logs/app.log and console."""
+    log_dir = os.path.dirname(log_path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    abs_log_path = os.path.abspath(log_path)
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(level)
+
+    for logger_name in ("llm_file_assistant", "fs_tools"):
+        log_instance = logging.getLogger(logger_name)
+        log_instance.setLevel(level)
+        # Avoid duplicate handlers if already configured
+        has_handler = any(
+            isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == abs_log_path
+            for h in log_instance.handlers
+        )
+        if not has_handler:
+            log_instance.addHandler(file_handler)
+
+
+# Auto-configure structured logging on module load
+setup_logging()
+
 logger = logging.getLogger("llm_file_assistant")
-if not logger.handlers:
-    logger.addHandler(logging.NullHandler())
 
 
 class LLMProviderError(Exception):
@@ -395,21 +428,24 @@ def dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
     """
     logger.info("Dispatching tool call: name='%s', args=%s", name, arguments)
 
+    start_time = time.perf_counter()
+
     if not name or not isinstance(name, str):
-        return {
-            "success": False,
-            "error": "Dispatch error: tool name must be a non-empty string.",
-        }
+        err = "Dispatch error: tool name must be a non-empty string."
+        logger.info("tool_call: name='%s' success=False duration_ms=0.00 args=%s error='%s'", name, arguments, err)
+        return {"success": False, "error": err}
 
     if name not in TOOL_REGISTRY:
         available = ", ".join(sorted(TOOL_REGISTRY.keys()))
         err = f"Unknown tool '{name}'. Available tools are: {available}."
         logger.warning("Dispatcher rejected tool name: %s", err)
+        logger.info("tool_call: name='%s' success=False duration_ms=0.00 args=%s error='%s'", name, arguments, err)
         return {"success": False, "error": err}
 
     if not isinstance(arguments, dict):
         err = f"Dispatch error: arguments for '{name}' must be a dictionary, got {type(arguments).__name__}."
         logger.warning(err)
+        logger.info("tool_call: name='%s' success=False duration_ms=0.00 args=%s error='%s'", name, arguments, err)
         return {"success": False, "error": err}
 
     # Validate required arguments
@@ -418,6 +454,7 @@ def dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
     if missing:
         err = f"Missing required argument(s) for '{name}': {', '.join(missing)}."
         logger.warning("Dispatcher argument validation failed: %s", err)
+        logger.info("tool_call: name='%s' success=False duration_ms=0.00 args=%s error='%s'", name, arguments, err)
         return {"success": False, "error": err}
 
     # Dispatch to tool function
@@ -429,11 +466,28 @@ def dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
         valid_kwargs = {k: v for k, v in arguments.items() if k in sig.parameters}
 
         result = target_func(**valid_kwargs)
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        success = result.get("success", True) if isinstance(result, dict) else True
+        logger.info(
+            "tool_call: name='%s' success=%s duration_ms=%.2f args=%s",
+            name,
+            success,
+            duration_ms,
+            arguments,
+        )
         return result
 
     except Exception as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
         err = f"Unexpected execution error during dispatch of '{name}': {str(exc)}"
         logger.exception(err)
+        logger.info(
+            "tool_call: name='%s' success=False duration_ms=%.2f args=%s error='%s'",
+            name,
+            duration_ms,
+            arguments,
+            err,
+        )
         return {"success": False, "error": err}
 
 
