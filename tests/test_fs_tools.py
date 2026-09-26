@@ -8,7 +8,15 @@ from pathlib import Path
 from datetime import datetime
 import pytest
 
-from fs_tools import read_file, list_files, write_file, search_in_file
+from fs_tools import (
+    read_file,
+    list_files,
+    write_file,
+    search_in_file,
+    get_base_dir,
+    set_base_dir,
+    reset_base_dir,
+)
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -251,7 +259,7 @@ def test_read_file_never_raises():
         "fixtures/does_not_exist.txt",
         "",
         "/invalid/root/path/to/nowhere.pdf",
-        "CON",  # Windows reserved device name
+        "in*valid?name",
         str(FIXTURES_DIR / "corrupt.pdf"),
         str(FIXTURES_DIR / "corrupt.docx"),
     ]
@@ -390,7 +398,7 @@ def test_list_files_never_raises():
     bad_inputs = [
         "",
         None,
-        "CON",
+        "in*valid?name",
         "invalid://path??",
         "C:/non_existent_drive_z:/folder",
     ]
@@ -507,7 +515,7 @@ def test_write_file_never_raises():
     bad_calls = [
         ("", ""),
         (None, None),
-        ("CON", "Windows device"),
+        ("in*valid?name", "Windows device"),
         ("invalid://path/file.txt", "content"),
     ]
     for path, content in bad_calls:
@@ -653,7 +661,7 @@ def test_search_never_raises():
     bad_calls = [
         ("", ""),
         (None, None),
-        ("CON", "Windows device"),
+        ("in*valid?name", "Windows device"),
         ("invalid://path/file.txt", "search_term"),
         (str(FIXTURES_DIR / "corrupt.docx"), "keyword"),
     ]
@@ -664,6 +672,112 @@ def test_search_never_raises():
             assert "success" in res
         except Exception as exc:
             pytest.fail(f"search_in_file({path!r}, {kw!r}) raised unhandled exception: {exc}")
+
+
+# ============================================================================
+# Phase 6: Tool Layer Hardening (Path Sandboxing & Security Tests)
+# ============================================================================
+
+def test_read_file_path_traversal_rejected():
+    """Verify read_file rejects attempts to access files outside the base directory."""
+    traversal_paths = [
+        "../../etc/passwd",
+        "..\\..\\..\\Windows\\System32\\cmd.exe",
+        "C:/Windows/System32/drivers/etc/hosts",
+    ]
+    for p in traversal_paths:
+        res = read_file(p)
+        assert res["success"] is False
+        assert res["content"] is None
+        assert "traversal" in res["error"].lower() or "outside allowed" in res["error"].lower()
+
+
+def test_write_file_path_traversal_rejected():
+    """Verify write_file rejects attempts to write files outside the base directory."""
+    traversal_paths = [
+        "../../evil.txt",
+        "..\\..\\..\\Windows\\Temp\\evil.txt",
+        "C:/Windows/evil.txt",
+    ]
+    for p in traversal_paths:
+        res = write_file(p, "malicious payload")
+        assert res["success"] is False
+        assert res["bytes_written"] == 0
+        assert "traversal" in res["error"].lower() or "outside allowed" in res["error"].lower()
+
+
+def test_list_files_path_traversal_rejected():
+    """Verify list_files rejects attempts to list directories outside the base directory."""
+    traversal_paths = [
+        "../../",
+        "..\\..\\..\\Windows",
+        "C:/Windows",
+    ]
+    for p in traversal_paths:
+        res = list_files(p)
+        assert res == []
+
+
+def test_search_in_file_path_traversal_rejected():
+    """Verify search_in_file rejects attempts to search files outside the base directory."""
+    traversal_paths = [
+        "../../etc/passwd",
+        "..\\..\\..\\Windows\\System32\\cmd.exe",
+    ]
+    for p in traversal_paths:
+        res = search_in_file(p, "password")
+        assert res["success"] is False
+        assert res["match_count"] == 0
+        assert "traversal" in res["error"].lower() or "outside allowed" in res["error"].lower()
+
+
+def test_base_dir_configuration_and_isolation(tmp_path):
+    """Verify set_base_dir strictly restricts operations to the configured subfolder."""
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    secret_file = tmp_path / "secret.txt"
+    secret_file.write_text("classified data", encoding="utf-8")
+
+    allowed_file = sandbox / "allowed.txt"
+    allowed_file.write_text("public data", encoding="utf-8")
+
+    try:
+        set_base_dir(sandbox)
+        assert get_base_dir() == sandbox.resolve()
+
+        # Access inside sandbox succeeds
+        allowed_res = read_file("allowed.txt")
+        assert allowed_res["success"] is True
+        assert allowed_res["content"] == "public data"
+
+        # Attempt to escape sandbox via relative path fails
+        escape_res = read_file("../secret.txt")
+        assert escape_res["success"] is False
+        assert "traversal" in escape_res["error"].lower() or "outside allowed" in escape_res["error"].lower()
+
+    finally:
+        reset_base_dir()
+
+
+def test_zero_llm_imports_static_check():
+    """Enforce architectural invariant: fs_tools.py has zero dependencies on LLM provider SDKs."""
+    fs_tools_file = Path(__file__).parent.parent / "fs_tools.py"
+    content = fs_tools_file.read_text(encoding="utf-8").lower()
+    for forbidden in ["import openai", "from openai", "import anthropic", "from anthropic", "langchain"]:
+        assert forbidden not in content, f"Architectural violation: {forbidden} found in fs_tools.py"
+
+
+def test_logging_emits_records(caplog):
+    """Verify tool invocations produce structured log messages via logging framework."""
+    import logging
+    with caplog.at_level(logging.INFO, logger="fs_tools"):
+        _ = list_files("resumes")
+        _ = read_file(str(FIXTURES_DIR / "sample.txt"))
+
+    records = [rec.message for rec in caplog.records if rec.name == "fs_tools"]
+    assert any("list_files" in msg for msg in records)
+    assert any("read_file" in msg for msg in records)
+
 
 
 

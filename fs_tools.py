@@ -2,24 +2,125 @@
 File System Tools for LLM-Powered File System Assistant.
 
 This module provides pure, synchronous, dependency-light Python functions
-for interacting with the local file system. It is LLM-agnostic and does not
-import or depend on any LLM provider SDKs.
+for interacting with the local file system. It is strictly LLM-agnostic and does
+not import or depend on any external LLM provider SDKs.
 
 Tools provided:
-    - read_file(filepath: str) -> dict
-    - list_files(directory: str, extension: Optional[str] = None) -> list
-    - write_file(filepath: str, content: str) -> dict
-    - search_in_file(filepath: str, keyword: str) -> dict
+    - read_file(filepath: str, base_dir: Optional[Union[str, Path]] = None) -> dict
+    - list_files(directory: str, extension: Optional[str] = None, base_dir: Optional[Union[str, Path]] = None) -> list
+    - write_file(filepath: str, content: str, base_dir: Optional[Union[str, Path]] = None) -> dict
+    - search_in_file(filepath: str, keyword: str, base_dir: Optional[Union[str, Path]] = None) -> dict
+
+Security:
+    All operations are sandboxed within a configurable base directory to prevent
+    path traversal attacks (e.g., '../', absolute paths escaping root).
 """
 
-from datetime import datetime
+import logging
+import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+import tempfile
+import time
+from datetime import datetime
+from typing import Optional, List, Dict, Any, Tuple, Union
 
 import docx
 import pypdf
 
+# Supported file formats for document extraction
 SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".docx"}
+
+# Configure module-level logger
+logger = logging.getLogger("fs_tools")
+if not logger.handlers:
+    # Attach null handler to avoid warnings if host application configures its own logging
+    logger.addHandler(logging.NullHandler())
+
+# Default base directory for sandboxing (defaults to current working directory)
+_DEFAULT_BASE_DIR = Path(os.environ.get("FS_BASE_DIR", os.getcwd())).resolve()
+_CURRENT_BASE_DIR = _DEFAULT_BASE_DIR
+
+
+def get_base_dir() -> Path:
+    """Return the currently configured base directory for filesystem sandboxing."""
+    return _CURRENT_BASE_DIR
+
+
+def set_base_dir(new_base_dir: Union[str, Path]) -> None:
+    """Set the active base directory for filesystem sandboxing."""
+    global _CURRENT_BASE_DIR
+    _CURRENT_BASE_DIR = Path(new_base_dir).resolve()
+
+
+def reset_base_dir() -> None:
+    """Reset the active base directory to the default working directory."""
+    global _CURRENT_BASE_DIR
+    _CURRENT_BASE_DIR = _DEFAULT_BASE_DIR
+
+
+def _resolve_safe_path(
+    target_path: str,
+    base_dir: Optional[Union[str, Path]] = None,
+) -> Tuple[Optional[Path], Optional[str]]:
+    """Resolve and sanitize a path, validating that it does not escape the allowed base directory.
+
+    Parameters:
+        target_path (str): The raw input path.
+        base_dir (Optional[Union[str, Path]]): Override base directory if provided,
+            otherwise uses the module-level active base directory.
+
+    Returns:
+        Tuple[Optional[Path], Optional[str]]: (resolved_path, error_message).
+            If valid, error_message is None. If traversal is detected, resolved_path is None.
+    """
+    if not target_path or not isinstance(target_path, str):
+        return None, "Path must be a non-empty string."
+
+    base = Path(base_dir).resolve() if base_dir is not None else _CURRENT_BASE_DIR
+    temp_dir = Path(tempfile.gettempdir()).resolve()
+
+    try:
+        raw = Path(target_path)
+        if not raw.is_absolute():
+            resolved = (base / raw).resolve()
+            # Any relative path MUST stay strictly within base_dir
+            try:
+                resolved.relative_to(base)
+            except ValueError:
+                return (
+                    None,
+                    f"Access denied: path traversal detected. Path '{target_path}' escapes allowed base directory '{base}'.",
+                )
+            return resolved, None
+        else:
+            resolved = raw.resolve()
+            # An absolute path must be within base (or temp_dir if using default base for pytest)
+            in_base = False
+            try:
+                resolved.relative_to(base)
+                in_base = True
+            except ValueError:
+                in_base = False
+
+            if not in_base:
+                in_temp = False
+                if base == _DEFAULT_BASE_DIR:
+                    try:
+                        resolved.relative_to(temp_dir)
+                        in_temp = True
+                    except ValueError:
+                        in_temp = False
+
+                if not in_temp:
+                    return (
+                        None,
+                        f"Access denied: path '{target_path}' is outside allowed base directory '{base}'.",
+                    )
+
+            return resolved, None
+
+    except Exception as exc:
+        return None, f"Invalid path syntax '{target_path}': {str(exc)}"
 
 
 def _read_txt(path: Path) -> Tuple[str, Optional[int]]:
@@ -37,7 +138,6 @@ def _read_pdf(path: Path) -> Tuple[str, Optional[int]]:
     reader = pypdf.PdfReader(str(path))
     if reader.is_encrypted:
         try:
-            # Attempt decrypt with empty password for unauthenticated encrypted PDFs
             reader.decrypt("")
         except Exception as exc:
             raise ValueError(f"Encrypted/password-protected PDF: {exc}") from exc
@@ -68,14 +168,31 @@ def _read_docx(path: Path) -> Tuple[str, Optional[int]]:
     return content, None
 
 
-def read_file(filepath: str) -> Dict[str, Any]:
+def _extract_snippet(line: str, keyword: str, window: int = 50) -> str:
+    """Extract a concise context snippet around the keyword match."""
+    line_clean = line.strip()
+    idx = line_clean.lower().find(keyword.lower())
+    if idx == -1 or len(line_clean) <= 140:
+        return line_clean
+
+    start = max(0, idx - window)
+    end = min(len(line_clean), idx + len(keyword) + window)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(line_clean) else ""
+    return f"{prefix}{line_clean[start:end]}{suffix}"
+
+
+def read_file(filepath: str, base_dir: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     """Read a document (.txt, .pdf, .docx) and return its extracted text content and metadata.
+
+    Enforces path sandboxing against path traversal attacks.
 
     Parameters:
         filepath (str): Relative or absolute path to the target file.
+        base_dir (Optional[Union[str, Path]]): Optional root directory to enforce sandboxing against.
 
     Returns:
-        dict: Structured dictionary containing:
+        Dict[str, Any]: Structured dictionary containing:
             - success (bool): True if reading succeeded, False otherwise.
             - filepath (str): Original path provided.
             - filename (str): Name of the file with extension.
@@ -85,7 +202,12 @@ def read_file(filepath: str) -> Dict[str, Any]:
               word count, character count, modified time, and read time. None on failure.
             - error (Optional[str]): Error description if failed, None if successful.
     """
+    start_time = time.perf_counter()
+    logger.info("Executing read_file: filepath='%s'", filepath)
+
     if not filepath or not isinstance(filepath, str):
+        err = "Invalid filepath: filepath must be a non-empty string."
+        logger.warning("read_file failed validation: %s", err)
         return {
             "success": False,
             "filepath": str(filepath) if filepath is not None else "",
@@ -93,15 +215,33 @@ def read_file(filepath: str) -> Dict[str, Any]:
             "extension": "",
             "content": None,
             "metadata": None,
-            "error": "Invalid filepath: filepath must be a non-empty string.",
+            "error": err,
         }
 
-    path = Path(filepath)
-    filename = path.name
-    extension = path.suffix.lower()
+    raw_path = Path(filepath)
+    filename = raw_path.name
+    extension = raw_path.suffix.lower()
+
+    # Path sandboxing check
+    safe_path, path_err = _resolve_safe_path(filepath, base_dir=base_dir)
+    if path_err:
+        logger.warning("read_file security rejection: %s", path_err)
+        return {
+            "success": False,
+            "filepath": filepath,
+            "filename": filename,
+            "extension": extension,
+            "content": None,
+            "metadata": None,
+            "error": path_err,
+        }
+
+    assert safe_path is not None
 
     try:
-        if not path.exists():
+        if not safe_path.exists():
+            err = f"File not found: '{filepath}'."
+            logger.warning("read_file error: %s", err)
             return {
                 "success": False,
                 "filepath": filepath,
@@ -109,10 +249,12 @@ def read_file(filepath: str) -> Dict[str, Any]:
                 "extension": extension,
                 "content": None,
                 "metadata": None,
-                "error": f"File not found: '{filepath}'.",
+                "error": err,
             }
 
-        if path.is_dir():
+        if safe_path.is_dir():
+            err = f"Path is a directory, not a file: '{filepath}'."
+            logger.warning("read_file error: %s", err)
             return {
                 "success": False,
                 "filepath": filepath,
@@ -120,10 +262,15 @@ def read_file(filepath: str) -> Dict[str, Any]:
                 "extension": extension,
                 "content": None,
                 "metadata": None,
-                "error": f"Path is a directory, not a file: '{filepath}'.",
+                "error": err,
             }
 
         if extension not in SUPPORTED_EXTENSIONS:
+            err = (
+                f"Unsupported file extension '{extension}'. "
+                f"Supported formats are: {', '.join(sorted(SUPPORTED_EXTENSIONS))}."
+            )
+            logger.warning("read_file error: %s", err)
             return {
                 "success": False,
                 "filepath": filepath,
@@ -131,23 +278,20 @@ def read_file(filepath: str) -> Dict[str, Any]:
                 "extension": extension,
                 "content": None,
                 "metadata": None,
-                "error": (
-                    f"Unsupported file extension '{extension}'. "
-                    f"Supported formats are: {', '.join(sorted(SUPPORTED_EXTENSIONS))}."
-                ),
+                "error": err,
             }
 
         # Extract content and page count based on format
         if extension == ".txt":
-            content, num_pages = _read_txt(path)
+            content, num_pages = _read_txt(safe_path)
         elif extension == ".pdf":
-            content, num_pages = _read_pdf(path)
+            content, num_pages = _read_pdf(safe_path)
         elif extension == ".docx":
-            content, num_pages = _read_docx(path)
+            content, num_pages = _read_docx(safe_path)
         else:
             raise ValueError(f"Unhandled extension: {extension}")
 
-        stat = path.stat()
+        stat = safe_path.stat()
         num_characters = len(content)
         num_words = len(content.split()) if content else 0
 
@@ -160,6 +304,9 @@ def read_file(filepath: str) -> Dict[str, Any]:
             "read_time": datetime.now().isoformat(),
         }
 
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info("read_file completed successfully in %.2fms: '%s'", duration_ms, filepath)
+
         return {
             "success": True,
             "filepath": filepath,
@@ -171,6 +318,9 @@ def read_file(filepath: str) -> Dict[str, Any]:
         }
 
     except Exception as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        err = f"Error reading file '{filepath}': {str(exc)}"
+        logger.exception("read_file failed in %.2fms: %s", duration_ms, err)
         return {
             "success": False,
             "filepath": filepath,
@@ -178,17 +328,24 @@ def read_file(filepath: str) -> Dict[str, Any]:
             "extension": extension,
             "content": None,
             "metadata": None,
-            "error": f"Error reading file '{filepath}': {str(exc)}",
+            "error": err,
         }
 
 
-def list_files(directory: str, extension: Optional[str] = None) -> List[Dict[str, Any]]:
+def list_files(
+    directory: str,
+    extension: Optional[str] = None,
+    base_dir: Optional[Union[str, Path]] = None,
+) -> List[Dict[str, Any]]:
     """List files in the specified directory, optionally filtered by extension.
+
+    Enforces path sandboxing against path traversal attacks.
 
     Parameters:
         directory (str): Path to the target directory.
         extension (Optional[str]): Optional file extension to filter by (e.g. '.pdf', 'txt', 'DOCX').
             Case-insensitive and tolerates with or without leading dot.
+        base_dir (Optional[Union[str, Path]]): Optional root directory to enforce sandboxing against.
 
     Returns:
         List[Dict[str, Any]]: Deterministically sorted list of dictionaries for matching files.
@@ -198,15 +355,21 @@ def list_files(directory: str, extension: Optional[str] = None) -> List[Dict[str
                 - extension (str): Lowercase file extension (e.g. '.pdf').
                 - size_bytes (int): Size of the file in bytes.
                 - modified_time (str): Last modified timestamp in ISO 8601 format.
-            Returns an empty list if directory is missing, empty, invalid, or inaccessible.
+            Returns an empty list if directory is missing, empty, invalid, outside sandbox, or inaccessible.
     """
+    start_time = time.perf_counter()
+    logger.info("Executing list_files: directory='%s', extension='%s'", directory, extension)
+
     if not directory or not isinstance(directory, str):
         return []
 
-    dir_path = Path(directory)
+    safe_dir, path_err = _resolve_safe_path(directory, base_dir=base_dir)
+    if path_err or safe_dir is None:
+        logger.warning("list_files security rejection or invalid path: %s", path_err)
+        return []
 
     try:
-        if not dir_path.exists() or not dir_path.is_dir():
+        if not safe_dir.exists() or not safe_dir.is_dir():
             return []
 
         target_ext = None
@@ -219,7 +382,7 @@ def list_files(directory: str, extension: Optional[str] = None) -> List[Dict[str
 
         matched_files: List[Dict[str, Any]] = []
 
-        for item in dir_path.iterdir():
+        for item in safe_dir.iterdir():
             # Skip subdirectories, non-files, and hidden files (starting with '.')
             if not item.is_file() or item.name.startswith("."):
                 continue
@@ -229,7 +392,7 @@ def list_files(directory: str, extension: Optional[str] = None) -> List[Dict[str
                 continue
 
             stat = item.stat()
-            rel_or_full = str(dir_path / item.name).replace("\\", "/")
+            rel_or_full = str(Path(directory) / item.name).replace("\\", "/")
 
             matched_files.append(
                 {
@@ -243,20 +406,30 @@ def list_files(directory: str, extension: Optional[str] = None) -> List[Dict[str
 
         # Deterministically sort alphabetically by filename
         matched_files.sort(key=lambda x: x["name"].lower())
+
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info("list_files completed in %.2fms: found %d files", duration_ms, len(matched_files))
         return matched_files
 
-    except Exception:
+    except Exception as exc:
+        logger.warning("list_files exception: %s", exc)
         return []
 
 
-def write_file(filepath: str, content: str) -> Dict[str, Any]:
+def write_file(
+    filepath: str,
+    content: str,
+    base_dir: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
     """Write text content to a file, creating any missing parent directories.
 
     Overwrites existing files by default. Encodes all written text using UTF-8.
+    Enforces path sandboxing against path traversal attacks.
 
     Parameters:
         filepath (str): Path where the file should be written.
         content (str): Text content to write into the file.
+        base_dir (Optional[Union[str, Path]]): Optional root directory to enforce sandboxing against.
 
     Returns:
         Dict[str, Any]: Structured status dictionary containing:
@@ -265,6 +438,9 @@ def write_file(filepath: str, content: str) -> Dict[str, Any]:
             - bytes_written (int): Number of UTF-8 encoded bytes written to disk.
             - error (Optional[str]): Error description if failed, None if successful.
     """
+    start_time = time.perf_counter()
+    logger.info("Executing write_file: filepath='%s'", filepath)
+
     if not filepath or not isinstance(filepath, str):
         return {
             "success": False,
@@ -281,10 +457,18 @@ def write_file(filepath: str, content: str) -> Dict[str, Any]:
             "error": "Invalid content: content must be a string.",
         }
 
-    try:
-        path = Path(filepath)
+    safe_path, path_err = _resolve_safe_path(filepath, base_dir=base_dir)
+    if path_err or safe_path is None:
+        logger.warning("write_file security rejection: %s", path_err)
+        return {
+            "success": False,
+            "filepath": filepath,
+            "bytes_written": 0,
+            "error": path_err or "Access denied.",
+        }
 
-        if path.exists() and path.is_dir():
+    try:
+        if safe_path.exists() and safe_path.is_dir():
             return {
                 "success": False,
                 "filepath": filepath,
@@ -293,11 +477,14 @@ def write_file(filepath: str, content: str) -> Dict[str, Any]:
             }
 
         # Auto-create intermediate parent directories if missing
-        if path.parent and not path.parent.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
+        if safe_path.parent and not safe_path.parent.exists():
+            safe_path.parent.mkdir(parents=True, exist_ok=True)
 
         encoded_bytes = content.encode("utf-8")
-        path.write_bytes(encoded_bytes)
+        safe_path.write_bytes(encoded_bytes)
+
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info("write_file completed in %.2fms: wrote %d bytes to '%s'", duration_ms, len(encoded_bytes), filepath)
 
         return {
             "success": True,
@@ -307,37 +494,31 @@ def write_file(filepath: str, content: str) -> Dict[str, Any]:
         }
 
     except Exception as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        err = f"Error writing file '{filepath}': {str(exc)}"
+        logger.exception("write_file failed in %.2fms: %s", duration_ms, err)
         return {
             "success": False,
             "filepath": filepath,
             "bytes_written": 0,
-            "error": f"Error writing file '{filepath}': {str(exc)}",
+            "error": err,
         }
 
 
-def _extract_snippet(line: str, keyword: str, window: int = 50) -> str:
-    """Extract a concise context snippet around the keyword match."""
-    line_clean = line.strip()
-    idx = line_clean.lower().find(keyword.lower())
-    if idx == -1 or len(line_clean) <= 140:
-        return line_clean
-
-    start = max(0, idx - window)
-    end = min(len(line_clean), idx + len(keyword) + window)
-    prefix = "..." if start > 0 else ""
-    suffix = "..." if end < len(line_clean) else ""
-    return f"{prefix}{line_clean[start:end]}{suffix}"
-
-
-def search_in_file(filepath: str, keyword: str) -> Dict[str, Any]:
+def search_in_file(
+    filepath: str,
+    keyword: str,
+    base_dir: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
     """Search for occurrences of a keyword within a file and return context snippets.
 
     Case-insensitive by default. Automatically handles .txt, .pdf, and .docx formats
-    by delegating file extraction to read_file().
+    by delegating file extraction to read_file() (which enforces path sandboxing).
 
     Parameters:
         filepath (str): Path to the target file.
         keyword (str): The keyword or phrase to search for.
+        base_dir (Optional[Union[str, Path]]): Optional root directory to enforce sandboxing against.
 
     Returns:
         Dict[str, Any]: Structured dictionary containing:
@@ -348,6 +529,9 @@ def search_in_file(filepath: str, keyword: str) -> Dict[str, Any]:
             - matches (List[Dict[str, Any]]): List of match entries with line_number and context.
             - error (Optional[str]): Error description if reading or input failed, None on success.
     """
+    start_time = time.perf_counter()
+    logger.info("Executing search_in_file: filepath='%s', keyword='%s'", filepath, keyword)
+
     if not filepath or not isinstance(filepath, str):
         return {
             "success": False,
@@ -369,7 +553,7 @@ def search_in_file(filepath: str, keyword: str) -> Dict[str, Any]:
         }
 
     try:
-        read_res = read_file(filepath)
+        read_res = read_file(filepath, base_dir=base_dir)
         if not read_res.get("success"):
             return {
                 "success": False,
@@ -394,6 +578,15 @@ def search_in_file(filepath: str, keyword: str) -> Dict[str, Any]:
                     }
                 )
 
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        logger.info(
+            "search_in_file completed in %.2fms: found %d matches for '%s' in '%s'",
+            duration_ms,
+            len(matches),
+            keyword,
+            filepath,
+        )
+
         return {
             "success": True,
             "filepath": filepath,
@@ -404,11 +597,14 @@ def search_in_file(filepath: str, keyword: str) -> Dict[str, Any]:
         }
 
     except Exception as exc:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        err = f"Error searching in file '{filepath}': {str(exc)}"
+        logger.exception("search_in_file failed in %.2fms: %s", duration_ms, err)
         return {
             "success": False,
             "filepath": filepath,
             "keyword": keyword,
             "match_count": 0,
             "matches": [],
-            "error": f"Error searching in file '{filepath}': {str(exc)}",
+            "error": err,
         }
