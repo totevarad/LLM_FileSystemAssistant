@@ -337,3 +337,116 @@ def test_single_tool_loop_live_integration():
     assert "sample" in lower_answer or "resume" in lower_answer or ".pdf" in lower_answer
 
 
+# ============================================================================
+# Phase 10: Multi-Tool-Call Loop Tests
+# ============================================================================
+
+def test_loop_two_sequential_tool_calls():
+    """Verify loop handles sequential chained tool calls across multiple turns."""
+    mock_provider = MagicMock()
+
+    # Turn 1: LLM requests list_files
+    turn1 = LLMResponse(
+        content="",
+        tool_calls=[ToolCallRequest(id="tc_list", name="list_files", arguments={"directory": "resumes"})],
+    )
+    # Turn 2: LLM receives file list, requests read_file on sample.txt
+    turn2 = LLMResponse(
+        content="",
+        tool_calls=[ToolCallRequest(id="tc_read", name="read_file", arguments={"filepath": "tests/fixtures/sample.txt"})],
+    )
+    # Turn 3: LLM receives content, outputs final answer
+    turn3 = LLMResponse(
+        content="Candidate John Doe has 6 years of experience in Python and FastAPI.",
+        tool_calls=None,
+    )
+
+    mock_provider.send.side_effect = [turn1, turn2, turn3]
+
+    ans = run_query("Find and read John Doe resume", provider=mock_provider)
+
+    assert "John Doe" in ans
+    assert "FastAPI" in ans
+    assert mock_provider.send.call_count == 3
+
+
+def test_loop_parallel_tool_calls_in_one_turn():
+    """Verify loop dispatches multiple tool calls issued in a single LLM response turn."""
+    mock_provider = MagicMock()
+
+    # Turn 1: LLM issues two parallel tool calls
+    turn1 = LLMResponse(
+        content="",
+        tool_calls=[
+            ToolCallRequest(id="tc_p1", name="read_file", arguments={"filepath": "tests/fixtures/sample.txt"}),
+            ToolCallRequest(id="tc_p2", name="read_file", arguments={"filepath": "tests/fixtures/sample.docx"}),
+        ],
+    )
+    # Turn 2: LLM receives both results and summarizes
+    turn2 = LLMResponse(
+        content="Summary: Both John Doe and Jane Smith possess Python expertise.",
+        tool_calls=None,
+    )
+
+    mock_provider.send.side_effect = [turn1, turn2]
+
+    ans = run_query("Compare candidates", provider=mock_provider)
+
+    assert "John Doe" in ans
+    assert "Jane Smith" in ans
+    assert mock_provider.send.call_count == 2
+
+    # Verify both tool results were passed to turn 2
+    turn2_messages = mock_provider.send.call_args_list[1][1]["messages"]
+    tool_results = [m for m in turn2_messages if m.get("role") == "tool"]
+    assert len(tool_results) == 2
+    assert tool_results[0]["tool_call_id"] == "tc_p1"
+    assert tool_results[1]["tool_call_id"] == "tc_p2"
+
+
+def test_loop_max_iterations_exceeded():
+    """Verify loop safely terminates and warns user when max_iterations limit is reached."""
+    mock_provider = MagicMock()
+
+    # Model perpetually calls tool without converging
+    mock_provider.send.return_value = LLMResponse(
+        content="",
+        tool_calls=[ToolCallRequest(id="tc_loop", name="list_files", arguments={"directory": "resumes"})],
+    )
+
+    result = run_query("Infinite task", provider=mock_provider, max_iterations=3)
+
+    assert "maximum allowed tool iterations (3)" in result
+    assert mock_provider.send.call_count == 3
+
+
+def test_loop_tool_error_is_relayed_not_fatal():
+    """Verify tool failures are relayed as tool responses without crashing the loop."""
+    mock_provider = MagicMock()
+
+    # Turn 1: LLM attempts to read missing file
+    turn1 = LLMResponse(
+        content="",
+        tool_calls=[ToolCallRequest(id="tc_err", name="read_file", arguments={"filepath": "missing_file_99.txt"})],
+    )
+    # Turn 2: LLM observes error in tool response and reports it helpfully
+    turn2 = LLMResponse(
+        content="I attempted to read missing_file_99.txt, but the file was not found.",
+        tool_calls=None,
+    )
+
+    mock_provider.send.side_effect = [turn1, turn2]
+
+    ans = run_query("Read missing_file_99.txt", provider=mock_provider)
+
+    assert "missing_file_99.txt" in ans
+    assert "not found" in ans.lower()
+    assert mock_provider.send.call_count == 2
+
+    # Verify the error was in the tool message content
+    turn2_messages = mock_provider.send.call_args_list[1][1]["messages"]
+    tool_msg = [m for m in turn2_messages if m.get("role") == "tool"][0]
+    assert "File not found" in tool_msg["content"]
+
+
+
