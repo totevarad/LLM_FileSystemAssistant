@@ -70,30 +70,15 @@ pip install -r requirements.txt
 ```
 
 ### 3. Environment Configuration
-Copy `.env.example` to `.env` (or create `.env`) and supply your API key:
+Copy and edit the `.env` file (or create `.env`) and supply your API key:
 
 ```env
-# Provider Selection (openai, groq, anthropic)
-LLM_PROVIDER=openai
 
-# Model Selection
-# Groq Example:
-GROQ_API_KEY=gsk_your_groq_api_key_here
-OPENAI_BASE_URL=https://api.groq.com/openai/v1
+# Groq API Key (get from https://console.groq.com/keys)
+GROQ_API_KEY=your_groq_api_key_here
+# Groq/OpenAI model to use
 LLM_MODEL=openai/gpt-oss-120b
 
-# OpenAI Example:
-# OPENAI_API_KEY=sk-proj-your_key_here
-# LLM_MODEL=gpt-4o
-
-# Anthropic Example:
-# LLM_PROVIDER=anthropic
-# ANTHROPIC_API_KEY=sk-ant-your_key_here
-# LLM_MODEL=claude-3-5-sonnet-20241022
-
-# Operational Settings
-MAX_TOOL_ITERATIONS=10
-FS_BASE_DIR=.
 ```
 
 ---
@@ -196,7 +181,3 @@ All system operations and tool invocations are logged with millisecond execution
 ```
 
 ---
-
-## 🛡️ License
-
-MIT License. Designed for safe, transparent, and autonomous file management.
