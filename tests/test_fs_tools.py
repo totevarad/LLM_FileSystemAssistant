@@ -1,7 +1,7 @@
 """
 Unit tests for fs_tools.py.
 
-Phase 1: read_file (TXT support, error contract, metadata accuracy).
+Phase 1 & Phase 2: read_file (TXT, PDF, DOCX, corrupt files, error contract, metadata accuracy).
 """
 
 from pathlib import Path
@@ -36,7 +36,6 @@ def test_read_file_txt_success():
     sample_path = str(FIXTURES_DIR / "sample.txt")
     result = read_file(sample_path)
 
-    # Contract assertions
     assert set(result.keys()) == EXPECTED_TOP_LEVEL_KEYS
     assert result["success"] is True
     assert result["filepath"] == sample_path
@@ -44,12 +43,10 @@ def test_read_file_txt_success():
     assert result["extension"] == ".txt"
     assert result["error"] is None
 
-    # Content assertions
     assert isinstance(result["content"], str)
     assert "John Doe" in result["content"]
     assert "Python" in result["content"]
 
-    # Metadata assertions
     meta = result["metadata"]
     assert set(meta.keys()) == EXPECTED_METADATA_KEYS
     assert meta["size_bytes"] > 0
@@ -58,9 +55,109 @@ def test_read_file_txt_success():
     assert meta["num_characters"] > 200
     assert meta["num_characters"] == len(result["content"])
 
-    # Timestamp assertions
     assert datetime.fromisoformat(meta["modified_time"]) is not None
     assert datetime.fromisoformat(meta["read_time"]) is not None
+
+
+def test_read_file_pdf_success():
+    """Verify successful reading of a valid .pdf resume fixture."""
+    pdf_path = str(FIXTURES_DIR / "sample.pdf")
+    result = read_file(pdf_path)
+
+    assert set(result.keys()) == EXPECTED_TOP_LEVEL_KEYS
+    assert result["success"] is True
+    assert result["filepath"] == pdf_path
+    assert result["filename"] == "sample.pdf"
+    assert result["extension"] == ".pdf"
+    assert result["error"] is None
+
+    assert isinstance(result["content"], str)
+    assert "Alex Johnson" in result["content"]
+    assert "Python" in result["content"]
+
+    meta = result["metadata"]
+    assert set(meta.keys()) == EXPECTED_METADATA_KEYS
+    assert meta["size_bytes"] > 0
+    assert meta["num_pages"] == 1
+    assert meta["num_words"] > 5
+    assert meta["num_characters"] == len(result["content"])
+
+    assert datetime.fromisoformat(meta["modified_time"]) is not None
+    assert datetime.fromisoformat(meta["read_time"]) is not None
+
+
+def test_read_file_docx_success():
+    """Verify successful reading of a valid .docx resume fixture."""
+    docx_path = str(FIXTURES_DIR / "sample.docx")
+    result = read_file(docx_path)
+
+    assert set(result.keys()) == EXPECTED_TOP_LEVEL_KEYS
+    assert result["success"] is True
+    assert result["filepath"] == docx_path
+    assert result["filename"] == "sample.docx"
+    assert result["extension"] == ".docx"
+    assert result["error"] is None
+
+    assert isinstance(result["content"], str)
+    assert "Jane Smith" in result["content"]
+    assert "Python" in result["content"]
+
+    meta = result["metadata"]
+    assert set(meta.keys()) == EXPECTED_METADATA_KEYS
+    assert meta["size_bytes"] > 0
+    assert meta["num_pages"] is None
+    assert meta["num_words"] > 10
+    assert meta["num_characters"] == len(result["content"])
+
+    assert datetime.fromisoformat(meta["modified_time"]) is not None
+    assert datetime.fromisoformat(meta["read_time"]) is not None
+
+
+def test_read_file_corrupt_pdf():
+    """Verify that a malformed/corrupt PDF returns success: False without raising."""
+    corrupt_pdf_path = str(FIXTURES_DIR / "corrupt.pdf")
+    result = read_file(corrupt_pdf_path)
+
+    assert set(result.keys()) == EXPECTED_TOP_LEVEL_KEYS
+    assert result["success"] is False
+    assert result["filepath"] == corrupt_pdf_path
+    assert result["filename"] == "corrupt.pdf"
+    assert result["extension"] == ".pdf"
+    assert result["content"] is None
+    assert result["metadata"] is None
+    assert result["error"] is not None
+    assert "error" in result["error"].lower() or "pdf" in result["error"].lower()
+
+
+def test_read_file_corrupt_docx():
+    """Verify that a malformed/corrupt DOCX returns success: False without raising."""
+    corrupt_docx_path = str(FIXTURES_DIR / "corrupt.docx")
+    result = read_file(corrupt_docx_path)
+
+    assert set(result.keys()) == EXPECTED_TOP_LEVEL_KEYS
+    assert result["success"] is False
+    assert result["filepath"] == corrupt_docx_path
+    assert result["filename"] == "corrupt.docx"
+    assert result["extension"] == ".docx"
+    assert result["content"] is None
+    assert result["metadata"] is None
+    assert result["error"] is not None
+
+
+def test_read_file_contract_uniformity():
+    """Verify that all supported formats return identical dictionary schema shapes."""
+    paths = [
+        str(FIXTURES_DIR / "sample.txt"),
+        str(FIXTURES_DIR / "sample.pdf"),
+        str(FIXTURES_DIR / "sample.docx"),
+    ]
+
+    for p in paths:
+        res = read_file(p)
+        assert set(res.keys()) == EXPECTED_TOP_LEVEL_KEYS
+        assert res["success"] is True
+        assert res["metadata"] is not None
+        assert set(res["metadata"].keys()) == EXPECTED_METADATA_KEYS
 
 
 def test_read_file_empty_file():
@@ -148,28 +245,15 @@ def test_read_file_invalid_inputs(invalid_input):
     assert "Invalid filepath" in result["error"]
 
 
-def test_read_file_pdf_and_docx_unsupported_in_phase_1():
-    """Verify that PDF and DOCX formats cleanly return unsupported errors in Phase 1."""
-    pdf_res = read_file(str(FIXTURES_DIR / "sample.pdf"))
-    assert set(pdf_res.keys()) == EXPECTED_TOP_LEVEL_KEYS
-    assert pdf_res["success"] is False
-    assert pdf_res["extension"] == ".pdf"
-    assert "Unsupported file extension" in pdf_res["error"]
-
-    docx_res = read_file(str(FIXTURES_DIR / "sample.docx"))
-    assert set(docx_res.keys()) == EXPECTED_TOP_LEVEL_KEYS
-    assert docx_res["success"] is False
-    assert docx_res["extension"] == ".docx"
-    assert "Unsupported file extension" in docx_res["error"]
-
-
 def test_read_file_never_raises():
     """Verify that read_file never raises an unhandled exception under various bad inputs."""
     bad_inputs = [
         "fixtures/does_not_exist.txt",
         "",
-        "/invalid/root/path/to/nowhere.txt",
+        "/invalid/root/path/to/nowhere.pdf",
         "CON",  # Windows reserved device name
+        str(FIXTURES_DIR / "corrupt.pdf"),
+        str(FIXTURES_DIR / "corrupt.docx"),
     ]
     for inp in bad_inputs:
         try:

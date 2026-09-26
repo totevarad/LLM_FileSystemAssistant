@@ -14,11 +14,62 @@ Tools provided:
 
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
+
+import docx
+import pypdf
+
+SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".docx"}
+
+
+def _read_txt(path: Path) -> Tuple[str, Optional[int]]:
+    """Read a .txt file with UTF-8 encoding and latin-1 fallback."""
+    raw_bytes = path.read_bytes()
+    try:
+        content = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        content = raw_bytes.decode("latin-1", errors="replace")
+    return content, None
+
+
+def _read_pdf(path: Path) -> Tuple[str, Optional[int]]:
+    """Read a .pdf file and extract text and page count using pypdf."""
+    reader = pypdf.PdfReader(str(path))
+    if reader.is_encrypted:
+        try:
+            # Attempt decrypt with empty password for unauthenticated encrypted PDFs
+            reader.decrypt("")
+        except Exception as exc:
+            raise ValueError(f"Encrypted/password-protected PDF: {exc}") from exc
+
+    pages_text = []
+    for page in reader.pages:
+        extracted = page.extract_text()
+        if extracted:
+            pages_text.append(extracted)
+    content = "\n".join(pages_text)
+    num_pages = len(reader.pages)
+    return content, num_pages
+
+
+def _read_docx(path: Path) -> Tuple[str, Optional[int]]:
+    """Read a .docx file and extract text from paragraphs and tables using python-docx."""
+    doc = docx.Document(str(path))
+    paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+    table_rows = []
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = " | ".join(cell.text.strip() for cell in row.cells if cell.text.strip())
+            if row_text:
+                table_rows.append(row_text)
+
+    all_parts = paragraphs + table_rows
+    content = "\n".join(all_parts)
+    return content, None
 
 
 def read_file(filepath: str) -> Dict[str, Any]:
-    """Read a document (.txt in Phase 1) and return its extracted text content and metadata.
+    """Read a document (.txt, .pdf, .docx) and return its extracted text content and metadata.
 
     Parameters:
         filepath (str): Relative or absolute path to the target file.
@@ -28,10 +79,10 @@ def read_file(filepath: str) -> Dict[str, Any]:
             - success (bool): True if reading succeeded, False otherwise.
             - filepath (str): Original path provided.
             - filename (str): Name of the file with extension.
-            - extension (str): Lowercase file extension (e.g., '.txt').
+            - extension (str): Lowercase file extension (e.g., '.txt', '.pdf', '.docx').
             - content (Optional[str]): Extracted text content, or None on failure.
-            - metadata (Optional[dict]): File statistics including size, word count,
-              character count, modified time, and read time. None on failure.
+            - metadata (Optional[dict]): File statistics including size, page count,
+              word count, character count, modified time, and read time. None on failure.
             - error (Optional[str]): Error description if failed, None if successful.
     """
     if not filepath or not isinstance(filepath, str):
@@ -72,7 +123,7 @@ def read_file(filepath: str) -> Dict[str, Any]:
                 "error": f"Path is a directory, not a file: '{filepath}'.",
             }
 
-        if extension != ".txt":
+        if extension not in SUPPORTED_EXTENSIONS:
             return {
                 "success": False,
                 "filepath": filepath,
@@ -80,15 +131,21 @@ def read_file(filepath: str) -> Dict[str, Any]:
                 "extension": extension,
                 "content": None,
                 "metadata": None,
-                "error": f"Unsupported file extension '{extension}'. Only .txt is supported in Phase 1.",
+                "error": (
+                    f"Unsupported file extension '{extension}'. "
+                    f"Supported formats are: {', '.join(sorted(SUPPORTED_EXTENSIONS))}."
+                ),
             }
 
-        # Read binary data and decode with UTF-8, falling back to latin-1
-        raw_bytes = path.read_bytes()
-        try:
-            content = raw_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            content = raw_bytes.decode("latin-1", errors="replace")
+        # Extract content and page count based on format
+        if extension == ".txt":
+            content, num_pages = _read_txt(path)
+        elif extension == ".pdf":
+            content, num_pages = _read_pdf(path)
+        elif extension == ".docx":
+            content, num_pages = _read_docx(path)
+        else:
+            raise ValueError(f"Unhandled extension: {extension}")
 
         stat = path.stat()
         num_characters = len(content)
@@ -96,7 +153,7 @@ def read_file(filepath: str) -> Dict[str, Any]:
 
         metadata = {
             "size_bytes": stat.st_size,
-            "num_pages": None,
+            "num_pages": num_pages,
             "num_words": num_words,
             "num_characters": num_characters,
             "modified_time": datetime.fromtimestamp(stat.st_mtime).isoformat(),
