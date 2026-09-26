@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime
 import pytest
 
-from fs_tools import read_file, list_files, write_file
+from fs_tools import read_file, list_files, write_file, search_in_file
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -517,5 +517,153 @@ def test_write_file_never_raises():
             assert "success" in res
         except Exception as exc:
             pytest.fail(f"write_file({path!r}, {content!r}) raised unhandled exception: {exc}")
+
+
+# ============================================================================
+# Phase 5: search_in_file tests
+# ============================================================================
+
+EXPECTED_SEARCH_KEYS = {
+    "success",
+    "filepath",
+    "keyword",
+    "match_count",
+    "matches",
+    "error",
+}
+
+
+def test_search_case_insensitive():
+    """Verify case-insensitive search finds uppercase and lowercase occurrences."""
+    sample_txt = str(FIXTURES_DIR / "sample.txt")
+    res = search_in_file(sample_txt, "python")
+
+    assert set(res.keys()) == EXPECTED_SEARCH_KEYS
+    assert res["success"] is True
+    assert res["filepath"] == sample_txt
+    assert res["keyword"] == "python"
+    assert res["match_count"] >= 3
+    assert len(res["matches"]) == res["match_count"]
+    assert res["error"] is None
+
+    # Verify structure of matches
+    for match in res["matches"]:
+        assert "line_number" in match
+        assert "context" in match
+        assert "python" in match["context"].lower()
+
+
+def test_search_no_match():
+    """Verify searching for a non-existent keyword returns success: True with 0 matches."""
+    sample_txt = str(FIXTURES_DIR / "sample.txt")
+    res = search_in_file(sample_txt, "non_existent_keyword_xyz_999")
+
+    assert set(res.keys()) == EXPECTED_SEARCH_KEYS
+    assert res["success"] is True
+    assert res["match_count"] == 0
+    assert res["matches"] == []
+    assert res["error"] is None
+
+
+def test_search_in_pdf():
+    """Verify search_in_file delegates correctly to read_file on PDF documents."""
+    sample_pdf = str(FIXTURES_DIR / "sample.pdf")
+    res = search_in_file(sample_pdf, "Kubernetes")
+
+    assert res["success"] is True
+    assert res["match_count"] >= 1
+    assert any("Kubernetes" in m["context"] for m in res["matches"])
+
+
+def test_search_in_docx():
+    """Verify search_in_file delegates correctly to read_file on DOCX documents."""
+    sample_docx = str(FIXTURES_DIR / "sample.docx")
+    res = search_in_file(sample_docx, "PyTorch")
+
+    assert res["success"] is True
+    assert res["match_count"] >= 1
+    assert any("PyTorch" in m["context"] for m in res["matches"])
+
+
+def test_search_unreadable_missing_file():
+    """Verify search on a non-existent file returns success: False propagating read error."""
+    missing_path = str(FIXTURES_DIR / "non_existent_file_54321.txt")
+    res = search_in_file(missing_path, "python")
+
+    assert set(res.keys()) == EXPECTED_SEARCH_KEYS
+    assert res["success"] is False
+    assert res["match_count"] == 0
+    assert res["matches"] == []
+    assert "File not found" in res["error"]
+
+
+def test_search_corrupt_file():
+    """Verify search on a corrupt file returns success: False without raising."""
+    corrupt_path = str(FIXTURES_DIR / "corrupt.pdf")
+    res = search_in_file(corrupt_path, "python")
+
+    assert set(res.keys()) == EXPECTED_SEARCH_KEYS
+    assert res["success"] is False
+    assert res["match_count"] == 0
+    assert res["matches"] == []
+    assert res["error"] is not None
+
+
+def test_search_context_window_snippet(tmp_path):
+    """Verify snippet truncation handles long lines cleanly with ellipsis."""
+    long_line = "PrefixText " + ("word " * 60) + "TARGET_KEYWORD" + (" word" * 60) + " SuffixText"
+    test_file = tmp_path / "long_line.txt"
+    test_file.write_text(long_line, encoding="utf-8")
+
+    res = search_in_file(str(test_file), "TARGET_KEYWORD")
+    assert res["success"] is True
+    assert res["match_count"] == 1
+    context = res["matches"][0]["context"]
+    assert "TARGET_KEYWORD" in context
+    assert context.startswith("...") or context.endswith("...")
+
+
+@pytest.mark.parametrize("invalid_kw", ["", "   ", None, 12345, [], {}])
+def test_search_invalid_keyword(invalid_kw):
+    """Verify empty or non-string keywords return structured failure without raising."""
+    sample_txt = str(FIXTURES_DIR / "sample.txt")
+    res = search_in_file(sample_txt, invalid_kw)
+
+    assert set(res.keys()) == EXPECTED_SEARCH_KEYS
+    assert res["success"] is False
+    assert res["match_count"] == 0
+    assert res["matches"] == []
+    assert "Invalid keyword" in res["error"]
+
+
+@pytest.mark.parametrize("invalid_path", ["", None, 12345, [], {}])
+def test_search_invalid_filepath(invalid_path):
+    """Verify empty or non-string filepaths return structured failure without raising."""
+    res = search_in_file(invalid_path, "python")
+
+    assert set(res.keys()) == EXPECTED_SEARCH_KEYS
+    assert res["success"] is False
+    assert res["match_count"] == 0
+    assert res["matches"] == []
+    assert "Invalid filepath" in res["error"]
+
+
+def test_search_never_raises():
+    """Verify search_in_file never raises unhandled exceptions for pathological inputs."""
+    bad_calls = [
+        ("", ""),
+        (None, None),
+        ("CON", "Windows device"),
+        ("invalid://path/file.txt", "search_term"),
+        (str(FIXTURES_DIR / "corrupt.docx"), "keyword"),
+    ]
+    for path, kw in bad_calls:
+        try:
+            res = search_in_file(path, kw)
+            assert isinstance(res, dict)
+            assert "success" in res
+        except Exception as exc:
+            pytest.fail(f"search_in_file({path!r}, {kw!r}) raised unhandled exception: {exc}")
+
 
 

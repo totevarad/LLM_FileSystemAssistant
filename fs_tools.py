@@ -315,6 +315,100 @@ def write_file(filepath: str, content: str) -> Dict[str, Any]:
         }
 
 
+def _extract_snippet(line: str, keyword: str, window: int = 50) -> str:
+    """Extract a concise context snippet around the keyword match."""
+    line_clean = line.strip()
+    idx = line_clean.lower().find(keyword.lower())
+    if idx == -1 or len(line_clean) <= 140:
+        return line_clean
+
+    start = max(0, idx - window)
+    end = min(len(line_clean), idx + len(keyword) + window)
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(line_clean) else ""
+    return f"{prefix}{line_clean[start:end]}{suffix}"
+
+
 def search_in_file(filepath: str, keyword: str) -> Dict[str, Any]:
-    """Search for occurrences of a keyword within a file and return context snippets."""
-    raise NotImplementedError("Phase 5 implementation pending")
+    """Search for occurrences of a keyword within a file and return context snippets.
+
+    Case-insensitive by default. Automatically handles .txt, .pdf, and .docx formats
+    by delegating file extraction to read_file().
+
+    Parameters:
+        filepath (str): Path to the target file.
+        keyword (str): The keyword or phrase to search for.
+
+    Returns:
+        Dict[str, Any]: Structured dictionary containing:
+            - success (bool): True if file was read and searched, False if read failed.
+            - filepath (str): Original target path.
+            - keyword (str): Original keyword queried.
+            - match_count (int): Total number of lines containing the keyword.
+            - matches (List[Dict[str, Any]]): List of match entries with line_number and context.
+            - error (Optional[str]): Error description if reading or input failed, None on success.
+    """
+    if not filepath or not isinstance(filepath, str):
+        return {
+            "success": False,
+            "filepath": str(filepath) if filepath is not None else "",
+            "keyword": str(keyword) if keyword is not None else "",
+            "match_count": 0,
+            "matches": [],
+            "error": "Invalid filepath: filepath must be a non-empty string.",
+        }
+
+    if not keyword or not isinstance(keyword, str) or not keyword.strip():
+        return {
+            "success": False,
+            "filepath": filepath,
+            "keyword": str(keyword) if keyword is not None else "",
+            "match_count": 0,
+            "matches": [],
+            "error": "Invalid keyword: keyword must be a non-empty string.",
+        }
+
+    try:
+        read_res = read_file(filepath)
+        if not read_res.get("success"):
+            return {
+                "success": False,
+                "filepath": filepath,
+                "keyword": keyword,
+                "match_count": 0,
+                "matches": [],
+                "error": read_res.get("error", f"Failed to read file '{filepath}'"),
+            }
+
+        content = read_res.get("content") or ""
+        clean_keyword = keyword.strip()
+        keyword_lower = clean_keyword.lower()
+
+        matches: List[Dict[str, Any]] = []
+        for line_idx, line in enumerate(content.splitlines(), start=1):
+            if keyword_lower in line.lower():
+                matches.append(
+                    {
+                        "line_number": line_idx,
+                        "context": _extract_snippet(line, clean_keyword),
+                    }
+                )
+
+        return {
+            "success": True,
+            "filepath": filepath,
+            "keyword": keyword,
+            "match_count": len(matches),
+            "matches": matches,
+            "error": None,
+        }
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "filepath": filepath,
+            "keyword": keyword,
+            "match_count": 0,
+            "matches": [],
+            "error": f"Error searching in file '{filepath}': {str(exc)}",
+        }
