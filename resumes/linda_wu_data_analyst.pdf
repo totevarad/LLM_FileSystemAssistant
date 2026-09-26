@@ -1,0 +1,53 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1006 >>
+stream
+BT
+/F1 10 Tf
+14 TL
+72 750 Td
+(Linda Wu - Lead Business Intelligence & Data Analyst) Tj
+T* (Email: linda.wu@example.com | Location: Atlanta, GA) Tj
+T* () Tj
+T* (Professional Summary:) Tj
+T* (Senior Data Analyst with 7 years turning complex data into actionable operational strategies.) Tj
+T* (Expertise in modern cloud data warehouses \(Snowflake, BigQuery\), SQL query tuning, and Tableau visualization.) Tj
+T* () Tj
+T* (Experience:) Tj
+T* (- Lead BI Analyst at Retail Insights Analytics \(2020 - Present\)) Tj
+T* (  * Built automated executive dashboards in Tableau tracking $120M in omnichannel revenue.) Tj
+T* (  * Formulated customer segmentation models that boosted targeted marketing conversion by 22%.) Tj
+T* (- Data Analyst at Beacon Metrics \(2017 - 2020\)) Tj
+T* (  * Modeled ETL data pipelines in Snowflake and dbt to aggregate multi-source sales records.) Tj
+T* () Tj
+T* (Skills:) Tj
+T* (Advanced SQL, Tableau, Power BI, Snowflake, BigQuery, dbt, Looker, Excel VBA, Statistical Analysis.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000001305 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1375
+%%EOF

@@ -291,9 +291,11 @@ def test_list_files_all():
     assert isinstance(res, list)
     assert len(res) >= 3  # sample.docx, sample.pdf, sample.txt
 
+    names = {entry["name"] for entry in res}
+    assert {"sample.docx", "sample.pdf", "sample.txt"}.issubset(names)
+
     for entry in res:
         assert set(entry.keys()) == EXPECTED_LIST_FILES_KEYS
-        assert entry["name"] in {"sample.docx", "sample.pdf", "sample.txt"}
         assert entry["size_bytes"] > 0
         assert entry["extension"].startswith(".")
         assert datetime.fromisoformat(entry["modified_time"]) is not None

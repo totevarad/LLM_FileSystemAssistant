@@ -1,0 +1,54 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 1140 >>
+stream
+BT
+/F1 10 Tf
+14 TL
+72 750 Td
+(Sophia Alvarez - Generative AI & NLP Research Scientist) Tj
+T* (Email: sophia.alvarez@example.com | Location: Palo Alto, CA) Tj
+T* () Tj
+T* (Professional Summary:) Tj
+T* (AI researcher with 6+ years using Python for natural language processing and generative language models.) Tj
+T* (Extensive experience fine-tuning LLMs with PyTorch, building RAG systems with LangChain, and vector embeddings.) Tj
+T* () Tj
+T* (Experience:) Tj
+T* (- Senior AI Scientist at Cognitive DeepLab \(2021 - Present\)) Tj
+T* (  * Built production Python RAG pipeline with LlamaIndex, LangChain, and Qdrant vector database.) Tj
+T* (  * Fine-tuned open-source LLMs using PyTorch and Hugging Face PEFT/LoRA, reducing hallucination by 40%.) Tj
+T* (- NLP Engineer at TensorWave AI \(2018 - 2021\)) Tj
+T* (  * Developed custom Python NLP pipelines for semantic search and intent classification using spaCy.) Tj
+T* (  * Scaled model inference on multi-GPU clusters using Ray and Triton.) Tj
+T* () Tj
+T* (Python & AI Skills:) Tj
+T* (Python, PyTorch, Hugging Face, LangChain, LlamaIndex, NumPy, Pandas, Scikit-Learn, ChromaDB, FastAPI.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000121 00000 n 
+0000000247 00000 n 
+0000001439 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+1509
+%%EOF

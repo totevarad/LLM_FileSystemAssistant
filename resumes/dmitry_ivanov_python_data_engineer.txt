@@ -1,0 +1,22 @@
+Dmitry Ivanov
+Principal Python Data Engineer
+Email: dmitry.ivanov@example.com | Location: New York, NY | GitHub: github.com/divanov-data
+
+Summary:
+Senior Data Engineer with 8 years of experience constructing large-scale data lakehouse architectures using Python.
+Deep expertise in PySpark, Apache Airflow, Delta Lake, Snowflake, and streaming event ingestion.
+
+Experience:
+Principal Data Engineer | BigData Stream Corp (2020 - Present)
+- Engineered enterprise batch and streaming pipelines processing 10TB+ daily using Python, PySpark, and AWS EMR.
+- Programmed custom Python DAGs and operators in Apache Airflow managing 500+ daily scheduled pipeline runs.
+- Reduced data transformation runtime by 55% by tuning PySpark partition strategies and memory serialization.
+
+Senior Data Pipeline Engineer | Lakehouse Analytics (2016 - 2020)
+- Developed robust Python ETL scripts extracting data from REST APIs, Salesforce, and Postgres into Snowflake.
+- Integrated automated data validation and schema drift detection using Great Expectations in Python.
+
+Technical Skills:
+- Primary Languages: Python, SQL, Scala
+- Python Data Stack: PySpark, Pandas, Polars, Apache Airflow, dbt, Fastparquet, SQLAlchemy
+- Cloud & Storage: Snowflake, Delta Lake, AWS S3, Apache Kafka, Databricks, Docker

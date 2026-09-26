@@ -1,0 +1,22 @@
+Rachel Adams
+Lead QA Automation Engineer
+Email: rachel.adams@example.com | Location: Boston, MA | GitHub: github.com/racheladams-qa
+
+Summary:
+Quality Assurance leader with 7 years of expertise establishing test automation frameworks for web, mobile, and APIs.
+Champion of Shift-Left testing principles, continuous integration test suites, and performance benchmarking.
+
+Experience:
+Lead QA Automation Engineer | QualityLogic Inc (2019 - Present)
+- Built enterprise-grade end-to-end automation suite with Playwright and TypeScript, reducing test execution time by 60%.
+- Created regression test automation suites covering 1,200+ test cases integrated into GitLab CI.
+- Mentored junior QA engineers in writing robust BDD scenarios using Cucumber and Gherkin.
+
+Senior QA Engineer | TestWave Software (2016 - 2019)
+- Automated API functional testing with RestAssured and Postman Newman CLI.
+- Maintained Selenium WebDriver grid executing distributed parallel browser test suites.
+
+Technical Skills:
+- Frameworks: Playwright, Cypress, Selenium WebDriver, RestAssured, Appium, Cucumber BDD
+- Languages: TypeScript, JavaScript, Java, Groovy
+- CI/CD & Testing Tools: GitHub Actions, Jenkins, Postman, JMeter, TestRail, Docker

@@ -1,0 +1,23 @@
+Priya Patel
+Enterprise Java Backend Architect
+Email: priya.patel@example.com | Location: New York, NY | LinkedIn: linkedin.com/in/priyapatel-java
+
+Summary:
+Distinguished Java Engineer with 9 years of experience designing mission-critical distributed systems in fintech.
+Specialized in Java 21, Spring Boot, Spring Cloud, Apache Kafka, and resilient event-driven architectures.
+
+Experience:
+Principal Java Engineer | Global Financial Services (2018 - Present)
+- Designed high-frequency transactional messaging architecture processing 100k events/sec using Kafka and Spring Boot.
+- Migrated legacy monolithic enterprise banking applications into decoupled microservices on OpenShift.
+- Championed zero-downtime database migrations across distributed Oracle and PostgreSQL databases.
+
+Senior Backend Developer | Nexa Systems (2014 - 2018)
+- Developed secure RESTful APIs adhering to open banking standards with OAuth2 and JWT.
+- Integrated Hibernate and JPA caching strategies, cutting database CPU utilization by 30%.
+
+Technical Skills:
+- Core Languages: Java 17/21, Kotlin, SQL
+- Frameworks: Spring Boot, Spring Cloud, Spring Data, Hibernate, Quarkus
+- Messaging & Databases: Apache Kafka, RabbitMQ, PostgreSQL, Oracle DB, Redis
+- Tools: Docker, Kubernetes, Jenkins, Maven, Gradle, Splunk

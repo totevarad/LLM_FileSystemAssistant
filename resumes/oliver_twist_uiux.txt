@@ -1,0 +1,22 @@
+Oliver Twist
+Principal Product & UI/UX Designer
+Email: oliver.twist@example.com | Location: Los Angeles, CA | Portfolio: oliverdesign.portfolio.io
+
+Summary:
+Product designer with 8 years crafting user-centered digital products across web, mobile, and desktop ecosystems.
+Specialized in design systems, high-fidelity interactive prototyping, usability research, and developer handoffs.
+
+Experience:
+Principal Product Designer | Creative Aura Labs (2020 - Present)
+- Architected unified multi-brand design system in Figma comprising 300+ tokenized UI components.
+- Led user research workshops and contextual inquiries with 50+ enterprise clients to redesign workflow UX.
+- Improved product task completion rate by 34% through iterative usability testing and information architecture refinements.
+
+Senior UX Designer | Studio Velocity (2016 - 2020)
+- Designed end-to-end user journeys, wireframes, and clickable prototypes for FinTech mobile applications.
+- Collaborated closely with React Native engineering teams during sprint grooming and QA design reviews.
+
+Design Tools & Skills:
+- Design & Prototyping: Figma, FigJam, Sketch, Adobe XD, Principle, InVision
+- Methods: User Journey Mapping, Wireframing, Rapid Prototyping, Usability Testing, Heuristic Evaluation
+- Technical Literacy: HTML5, CSS3, CSS Grid, Design Tokens, Accessibility (WCAG 2.1 AA)
