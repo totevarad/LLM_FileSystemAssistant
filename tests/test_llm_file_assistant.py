@@ -20,6 +20,8 @@ from llm_file_assistant import (
     serialize_tool_result,
     TOOL_REGISTRY,
     TOOL_SCHEMAS,
+    run_query,
+    DEFAULT_SYSTEM_PROMPT,
 )
 
 
@@ -257,4 +259,81 @@ def test_serialize_tool_result():
     import json
     parsed = json.loads(serialized)
     assert parsed == data
+
+
+# ============================================================================
+# Phase 9: Single Tool-Call Loop Tests
+# ============================================================================
+
+def test_single_tool_loop_mocked():
+    """Verify run_query executes a single tool call round trip using a mocked provider."""
+    mock_provider = MagicMock()
+
+    # Turn 1: LLM requests list_files tool call
+    turn1_response = LLMResponse(
+        content="",
+        tool_calls=[
+            ToolCallRequest(
+                id="call_list_resumes",
+                name="list_files",
+                arguments={"directory": "resumes"},
+            )
+        ],
+    )
+
+    # Turn 2: LLM receives tool output and returns final synthesis
+    turn2_response = LLMResponse(
+        content="I found 3 resumes in the resumes folder: sample.docx, sample.pdf, and sample.txt.",
+        tool_calls=None,
+    )
+
+    mock_provider.send.side_effect = [turn1_response, turn2_response]
+
+    answer = run_query("List all resumes", provider=mock_provider)
+
+    assert "sample.pdf" in answer
+    assert "sample.docx" in answer
+    assert mock_provider.send.call_count == 2
+
+    # Verify that the second call received the tool response message
+    second_call_messages = mock_provider.send.call_args_list[1][1]["messages"]
+    tool_messages = [m for m in second_call_messages if m.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    assert tool_messages[0]["tool_call_id"] == "call_list_resumes"
+    assert "sample.txt" in tool_messages[0]["content"]
+
+
+def test_single_tool_loop_direct_answer_no_tools():
+    """Verify run_query returns directly when the LLM provides an answer without tools."""
+    mock_provider = MagicMock()
+    mock_provider.send.return_value = LLMResponse(
+        content="Hello! How can I assist you with your files today?",
+        tool_calls=None,
+    )
+
+    answer = run_query("Hi there", provider=mock_provider)
+    assert answer == "Hello! How can I assist you with your files today?"
+    assert mock_provider.send.call_count == 1
+
+
+def test_single_tool_loop_invalid_query():
+    """Verify run_query handles empty or invalid queries gracefully."""
+    assert "Please provide a valid" in run_query("")
+    assert "Please provide a valid" in run_query(None)  # type: ignore
+
+
+@pytest.mark.integration
+def test_single_tool_loop_live_integration():
+    """Verify real single tool-call execution against configured LLM provider and live filesystem."""
+    api_key = os.environ.get("GROQ_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        pytest.skip("No live API key found in environment (.env)")
+
+    answer = run_query("List the files in the resumes directory")
+    assert isinstance(answer, str)
+    assert len(answer) > 10
+    # The answer should mention the files discovered by list_files
+    lower_answer = answer.lower()
+    assert "sample" in lower_answer or "resume" in lower_answer or ".pdf" in lower_answer
+
 
