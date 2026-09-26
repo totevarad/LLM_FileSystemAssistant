@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 import json
 import logging
 import os
+import sys
 from typing import Optional, List, Dict, Any
 
 import dotenv
@@ -295,8 +296,8 @@ TOOL_SCHEMAS: List[Dict[str, Any]] = [
                         "description": "Directory path to inspect (e.g., 'resumes', 'output').",
                     },
                     "extension": {
-                        "type": "string",
-                        "description": "Optional file extension to filter by (e.g., '.pdf', 'txt', 'docx').",
+                        "type": ["string", "null"],
+                        "description": "Optional file extension to filter by (e.g., '.pdf', 'txt', 'docx') or null for all files.",
                     },
                 },
                 "required": ["directory"],
@@ -630,6 +631,12 @@ def run_query(
 
 def run_cli() -> None:
     """Run the interactive Command Line Interface (CLI) REPL."""
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
     print("=" * 60)
     print("🤖 LLM File System Assistant CLI")
     print("Commands: 'exit' or 'quit' to terminate, 'clear' to reset history.")
