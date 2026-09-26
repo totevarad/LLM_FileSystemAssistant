@@ -8,7 +8,7 @@ from pathlib import Path
 from datetime import datetime
 import pytest
 
-from fs_tools import read_file, list_files
+from fs_tools import read_file, list_files, write_file
 
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -400,4 +400,122 @@ def test_list_files_never_raises():
             assert isinstance(res, list)
         except Exception as exc:
             pytest.fail(f"list_files({inp!r}) raised unhandled exception: {exc}")
+
+
+# ============================================================================
+# Phase 4: write_file tests
+# ============================================================================
+
+EXPECTED_WRITE_KEYS = {"success", "filepath", "bytes_written", "error"}
+
+
+def test_write_file_creates_new_dirs(tmp_path):
+    """Verify write_file automatically creates missing parent directories and writes content."""
+    nested_path = tmp_path / "deep" / "nested" / "directory" / "summary.txt"
+    target_str = str(nested_path)
+    content = "Summary of candidates:\n1. John Doe\n2. Jane Smith"
+
+    res = write_file(target_str, content)
+
+    assert set(res.keys()) == EXPECTED_WRITE_KEYS
+    assert res["success"] is True
+    assert res["filepath"] == target_str
+    assert res["bytes_written"] == len(content.encode("utf-8"))
+    assert res["error"] is None
+
+    assert nested_path.is_file()
+    assert nested_path.read_text(encoding="utf-8") == content
+
+
+def test_write_file_overwrites_existing(tmp_path):
+    """Verify write_file overwrites existing file content by default."""
+    target_file = tmp_path / "existing.txt"
+    target_str = str(target_file)
+
+    first_write = write_file(target_str, "Initial version")
+    assert first_write["success"] is True
+    assert target_file.read_text(encoding="utf-8") == "Initial version"
+
+    second_write = write_file(target_str, "Updated version with more details")
+    assert second_write["success"] is True
+    assert second_write["bytes_written"] == len("Updated version with more details".encode("utf-8"))
+    assert target_file.read_text(encoding="utf-8") == "Updated version with more details"
+
+
+def test_write_file_empty_content(tmp_path):
+    """Verify writing empty string creates a 0-byte file successfully."""
+    target_file = tmp_path / "empty_output.txt"
+    target_str = str(target_file)
+
+    res = write_file(target_str, "")
+
+    assert set(res.keys()) == EXPECTED_WRITE_KEYS
+    assert res["success"] is True
+    assert res["bytes_written"] == 0
+    assert res["error"] is None
+    assert target_file.is_file()
+    assert target_file.stat().st_size == 0
+
+
+def test_write_file_utf8_special_characters(tmp_path):
+    """Verify writing multilingual text and Unicode characters correctly encodes to UTF-8."""
+    target_file = tmp_path / "unicode.txt"
+    content = "Candidate: Renée Müller 🚀\nSkills: AI/ML, Python, C++\nNotes: Zürich based."
+
+    res = write_file(str(target_file), content)
+
+    assert res["success"] is True
+    assert res["bytes_written"] == len(content.encode("utf-8"))
+    assert target_file.read_text(encoding="utf-8") == content
+
+
+def test_write_file_target_is_existing_directory(tmp_path):
+    """Verify attempting to write to an existing directory path returns structured failure."""
+    res = write_file(str(tmp_path), "content")
+
+    assert set(res.keys()) == EXPECTED_WRITE_KEYS
+    assert res["success"] is False
+    assert res["bytes_written"] == 0
+    assert "directory" in res["error"].lower()
+
+
+@pytest.mark.parametrize("invalid_path", ["", None, 12345, [], {}])
+def test_write_file_invalid_filepath(invalid_path):
+    """Verify non-string or empty filepath arguments return structured error without raising."""
+    res = write_file(invalid_path, "sample content")
+
+    assert set(res.keys()) == EXPECTED_WRITE_KEYS
+    assert res["success"] is False
+    assert res["bytes_written"] == 0
+    assert "Invalid filepath" in res["error"]
+
+
+@pytest.mark.parametrize("invalid_content", [None, 12345, [], {}])
+def test_write_file_invalid_content(tmp_path, invalid_content):
+    """Verify non-string content arguments return structured error without raising."""
+    target_file = str(tmp_path / "invalid_content.txt")
+    res = write_file(target_file, invalid_content)
+
+    assert set(res.keys()) == EXPECTED_WRITE_KEYS
+    assert res["success"] is False
+    assert res["bytes_written"] == 0
+    assert "Invalid content" in res["error"]
+
+
+def test_write_file_never_raises():
+    """Verify write_file never raises unhandled exceptions for pathological inputs."""
+    bad_calls = [
+        ("", ""),
+        (None, None),
+        ("CON", "Windows device"),
+        ("invalid://path/file.txt", "content"),
+    ]
+    for path, content in bad_calls:
+        try:
+            res = write_file(path, content)
+            assert isinstance(res, dict)
+            assert "success" in res
+        except Exception as exc:
+            pytest.fail(f"write_file({path!r}, {content!r}) raised unhandled exception: {exc}")
+
 

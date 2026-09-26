@@ -250,8 +250,69 @@ def list_files(directory: str, extension: Optional[str] = None) -> List[Dict[str
 
 
 def write_file(filepath: str, content: str) -> Dict[str, Any]:
-    """Write text content to a file, creating any missing parent directories."""
-    raise NotImplementedError("Phase 4 implementation pending")
+    """Write text content to a file, creating any missing parent directories.
+
+    Overwrites existing files by default. Encodes all written text using UTF-8.
+
+    Parameters:
+        filepath (str): Path where the file should be written.
+        content (str): Text content to write into the file.
+
+    Returns:
+        Dict[str, Any]: Structured status dictionary containing:
+            - success (bool): True if write succeeded, False otherwise.
+            - filepath (str): Original target path.
+            - bytes_written (int): Number of UTF-8 encoded bytes written to disk.
+            - error (Optional[str]): Error description if failed, None if successful.
+    """
+    if not filepath or not isinstance(filepath, str):
+        return {
+            "success": False,
+            "filepath": str(filepath) if filepath is not None else "",
+            "bytes_written": 0,
+            "error": "Invalid filepath: filepath must be a non-empty string.",
+        }
+
+    if not isinstance(content, str):
+        return {
+            "success": False,
+            "filepath": filepath,
+            "bytes_written": 0,
+            "error": "Invalid content: content must be a string.",
+        }
+
+    try:
+        path = Path(filepath)
+
+        if path.exists() and path.is_dir():
+            return {
+                "success": False,
+                "filepath": filepath,
+                "bytes_written": 0,
+                "error": f"Target path '{filepath}' is an existing directory.",
+            }
+
+        # Auto-create intermediate parent directories if missing
+        if path.parent and not path.parent.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+        encoded_bytes = content.encode("utf-8")
+        path.write_bytes(encoded_bytes)
+
+        return {
+            "success": True,
+            "filepath": filepath,
+            "bytes_written": len(encoded_bytes),
+            "error": None,
+        }
+
+    except Exception as exc:
+        return {
+            "success": False,
+            "filepath": filepath,
+            "bytes_written": 0,
+            "error": f"Error writing file '{filepath}': {str(exc)}",
+        }
 
 
 def search_in_file(filepath: str, keyword: str) -> Dict[str, Any]:
