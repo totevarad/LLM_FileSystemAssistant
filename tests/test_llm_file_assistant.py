@@ -4,7 +4,7 @@ Unit tests for llm_file_assistant.py.
 Phase 7: LLM Provider Adapter (connectivity, payload construction, mock tests, error handling).
 """
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 import os
 import pytest
 
@@ -22,6 +22,8 @@ from llm_file_assistant import (
     TOOL_SCHEMAS,
     run_query,
     DEFAULT_SYSTEM_PROMPT,
+    Session,
+    run_cli,
 )
 
 
@@ -447,6 +449,103 @@ def test_loop_tool_error_is_relayed_not_fatal():
     turn2_messages = mock_provider.send.call_args_list[1][1]["messages"]
     tool_msg = [m for m in turn2_messages if m.get("role") == "tool"][0]
     assert "File not found" in tool_msg["content"]
+
+
+# ============================================================================
+# Phase 11: Session State & CLI REPL Tests
+# ============================================================================
+
+def test_session_initialization_and_clear():
+    """Verify Session initializes with system prompt and clear() restores it."""
+    session = Session(system_prompt="Custom instructions.")
+    assert len(session.messages) == 1
+    assert session.messages[0] == {"role": "system", "content": "Custom instructions."}
+
+    session.add_user_message("Hello")
+    session.add_assistant_message("Hi there!")
+    assert len(session.messages) == 3
+
+    session.clear()
+    assert len(session.messages) == 1
+    assert session.messages[0] == {"role": "system", "content": "Custom instructions."}
+
+
+def test_session_maintains_history_across_calls():
+    """Verify session maintains conversation history across successive run_query calls."""
+    mock_provider = MagicMock()
+
+    # Response 1: answering turn 1
+    resp1 = LLMResponse(content="I found 3 candidate resumes: Alice, Bob, Charlie.")
+    # Response 2: answering follow-up turn 2
+    resp2 = LLMResponse(content="Alice has 5 years of Python experience.")
+
+    mock_provider.send.side_effect = [resp1, resp2]
+
+    session = Session()
+
+    # Turn 1
+    ans1 = run_query("List the candidates", provider=mock_provider, session=session)
+    assert "Alice, Bob, Charlie" in ans1
+
+    # Turn 2: Follow-up question referencing turn 1 context
+    ans2 = run_query("Tell me more about the first candidate", provider=mock_provider, session=session)
+    assert "Alice has 5 years" in ans2
+
+    # Assert mock_provider received conversation history in turn 2
+    turn2_call_messages = mock_provider.send.call_args_list[1][1]["messages"]
+    assert len(turn2_call_messages) == 4
+    assert turn2_call_messages[0]["role"] == "system"
+    assert turn2_call_messages[1] == {"role": "user", "content": "List the candidates"}
+    assert turn2_call_messages[2] == {"role": "assistant", "content": "I found 3 candidate resumes: Alice, Bob, Charlie."}
+    assert turn2_call_messages[3] == {"role": "user", "content": "Tell me more about the first candidate"}
+
+    # Assert session.messages contains complete history including turn 2 assistant response
+    assert len(session.messages) == 5
+    assert session.messages[-1] == {"role": "assistant", "content": "Alice has 5 years of Python experience."}
+
+
+def test_run_query_importable_without_cli():
+    """Verify run_query can be called standalone as a library function without entering the CLI REPL."""
+    mock_provider = MagicMock()
+    mock_provider.send.return_value = LLMResponse(content="Standalone library response.")
+
+    result = run_query("Test library usage", provider=mock_provider)
+    assert result == "Standalone library response."
+
+
+def test_cli_repl_commands_exit_and_clear(capsys):
+    """Verify CLI REPL responds to exit, quit, and clear commands."""
+    with patch("builtins.input", side_effect=["clear", "exit"]):
+        run_cli()
+
+    captured = capsys.readouterr().out
+    assert "LLM File System Assistant CLI" in captured
+    assert "Conversation history cleared." in captured
+    assert "Goodbye!" in captured
+
+
+def test_cli_repl_handles_keyboard_interrupt(capsys):
+    """Verify CLI REPL exits gracefully on KeyboardInterrupt (Ctrl+C)."""
+    with patch("builtins.input", side_effect=KeyboardInterrupt):
+        run_cli()
+
+    captured = capsys.readouterr().out
+    assert "Exiting. Goodbye!" in captured
+
+
+def test_cli_repl_processes_query_and_prints_response(capsys):
+    """Verify CLI REPL handles a valid query turn and then exits cleanly."""
+    mock_provider = MagicMock()
+    mock_provider.send.return_value = LLMResponse(content="Candidate resume summary.")
+
+    with patch("llm_file_assistant.get_provider", return_value=mock_provider):
+        with patch("builtins.input", side_effect=["Summarize John Doe", "quit"]):
+            run_cli()
+
+    captured = capsys.readouterr().out
+    assert "Candidate resume summary." in captured
+    assert "Goodbye!" in captured
+
 
 
 
