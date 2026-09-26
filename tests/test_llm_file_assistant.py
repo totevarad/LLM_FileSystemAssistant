@@ -15,6 +15,11 @@ from llm_file_assistant import (
     OpenAICompatibleProvider,
     AnthropicProvider,
     get_provider,
+    get_tool_schemas,
+    dispatch_tool_call,
+    serialize_tool_result,
+    TOOL_REGISTRY,
+    TOOL_SCHEMAS,
 )
 
 
@@ -153,3 +158,103 @@ def test_live_groq_or_openai_connectivity_smoke():
     assert response is not None
     assert isinstance(response.content, str)
     assert len(response.content.strip()) > 0
+
+
+# ============================================================================
+# Phase 8: Tool Schema Registry & Dispatcher Tests
+# ============================================================================
+
+def test_schemas_conform_to_provider_spec():
+    """Verify that all four tool schemas follow standard OpenAI function schema specs."""
+    schemas = get_tool_schemas()
+    assert len(schemas) == 4
+
+    names = {s["function"]["name"] for s in schemas}
+    assert names == {"read_file", "list_files", "write_file", "search_in_file"}
+
+    for s in schemas:
+        assert s["type"] == "function"
+        fn = s["function"]
+        assert "name" in fn and isinstance(fn["name"], str)
+        assert "description" in fn and len(fn["description"]) > 10
+        assert "parameters" in fn
+        params = fn["parameters"]
+        assert params["type"] == "object"
+        assert "properties" in params
+        assert "required" in params and isinstance(params["required"], list)
+
+
+def test_dispatch_known_tools(tmp_path):
+    """Verify dispatch_tool_call invokes each tool correctly and returns expected results."""
+    # 1. list_files
+    list_res = dispatch_tool_call("list_files", {"directory": "resumes"})
+    assert isinstance(list_res, list)
+    assert len(list_res) >= 3
+
+    # 2. read_file
+    read_res = dispatch_tool_call("read_file", {"filepath": "tests/fixtures/sample.txt"})
+    assert isinstance(read_res, dict)
+    assert read_res["success"] is True
+    assert "John Doe" in read_res["content"]
+
+    # 3. write_file
+    out_file = str(tmp_path / "dispatch_out.txt")
+    write_res = dispatch_tool_call("write_file", {"filepath": out_file, "content": "Dispatched content"})
+    assert isinstance(write_res, dict)
+    assert write_res["success"] is True
+    assert write_res["bytes_written"] > 0
+
+    # 4. search_in_file
+    search_res = dispatch_tool_call("search_in_file", {"filepath": "tests/fixtures/sample.txt", "keyword": "python"})
+    assert isinstance(search_res, dict)
+    assert search_res["success"] is True
+    assert search_res["match_count"] >= 1
+
+
+def test_dispatch_unknown_tool():
+    """Verify unknown tool names return structured error without raising an exception."""
+    res = dispatch_tool_call("non_existent_tool_123", {"arg": "val"})
+    assert isinstance(res, dict)
+    assert res["success"] is False
+    assert "Unknown tool" in res["error"]
+    assert "Available tools are" in res["error"]
+
+
+def test_dispatch_missing_required_arguments():
+    """Verify missing required arguments are caught and returned as structured errors."""
+    # Missing filepath for read_file
+    res1 = dispatch_tool_call("read_file", {})
+    assert res1["success"] is False
+    assert "Missing required argument" in res1["error"]
+    assert "filepath" in res1["error"]
+
+    # Missing content for write_file
+    res2 = dispatch_tool_call("write_file", {"filepath": "out.txt"})
+    assert res2["success"] is False
+    assert "Missing required argument" in res2["error"]
+    assert "content" in res2["error"]
+
+    # Missing directory for list_files
+    res3 = dispatch_tool_call("list_files", {})
+    assert res3["success"] is False
+    assert "Missing required argument" in res3["error"]
+    assert "directory" in res3["error"]
+
+
+def test_dispatch_invalid_arguments_type():
+    """Verify non-dictionary arguments return structured dispatch error."""
+    res = dispatch_tool_call("read_file", "invalid_string_args")  # type: ignore
+    assert isinstance(res, dict)
+    assert res["success"] is False
+    assert "arguments for 'read_file' must be a dictionary" in res["error"]
+
+
+def test_serialize_tool_result():
+    """Verify serialize_tool_result produces valid, parseable JSON strings."""
+    data = {"success": True, "files": ["a.txt", "b.pdf"], "count": 2}
+    serialized = serialize_tool_result(data)
+    assert isinstance(serialized, str)
+    import json
+    parsed = json.loads(serialized)
+    assert parsed == data
+

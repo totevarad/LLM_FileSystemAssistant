@@ -253,6 +253,189 @@ def get_provider(
     return OpenAICompatibleProvider(api_key=api_key, base_url=base_url, model=model)
 
 
+# ============================================================================
+# Phase 8: Tool Schema Registry & Dispatcher
+# ============================================================================
+
+import fs_tools
+
+TOOL_SCHEMAS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": (
+                "Read a document (.pdf, .txt, .docx) from the local filesystem and extract its text content and metadata."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Path to the target document (e.g., 'resumes/john_doe.pdf').",
+                    },
+                },
+                "required": ["filepath"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_files",
+            "description": (
+                "Enumerate files in a directory on the local filesystem, optionally filtered by file extension."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory": {
+                        "type": "string",
+                        "description": "Directory path to inspect (e.g., 'resumes', 'output').",
+                    },
+                    "extension": {
+                        "type": "string",
+                        "description": "Optional file extension to filter by (e.g., '.pdf', 'txt', 'docx').",
+                    },
+                },
+                "required": ["directory"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": (
+                "Write text content to a file on the local filesystem, creating any missing parent directories automatically."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Target destination path (e.g., 'output/summary_john_doe.txt').",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The text content to write into the file.",
+                    },
+                },
+                "required": ["filepath", "content"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_in_file",
+            "description": (
+                "Search for occurrences of a keyword or phrase within a document (.pdf, .txt, .docx) and return context snippets."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filepath": {
+                        "type": "string",
+                        "description": "Path to the document to search within.",
+                    },
+                    "keyword": {
+                        "type": "string",
+                        "description": "The keyword or phrase to search for (case-insensitive).",
+                    },
+                },
+                "required": ["filepath", "keyword"],
+                "additionalProperties": False,
+            },
+        },
+    },
+]
+
+TOOL_REGISTRY: Dict[str, Any] = {
+    "read_file": fs_tools.read_file,
+    "list_files": fs_tools.list_files,
+    "write_file": fs_tools.write_file,
+    "search_in_file": fs_tools.search_in_file,
+}
+
+REQUIRED_TOOL_ARGS: Dict[str, List[str]] = {
+    "read_file": ["filepath"],
+    "list_files": ["directory"],
+    "write_file": ["filepath", "content"],
+    "search_in_file": ["filepath", "keyword"],
+}
+
+
+def get_tool_schemas() -> List[Dict[str, Any]]:
+    """Return the registered tool schemas formatted for LLM function calling."""
+    return TOOL_SCHEMAS
+
+
+def serialize_tool_result(result: Any) -> str:
+    """Serialize a tool execution result into a JSON string formatted for an LLM response."""
+    return json.dumps(result, default=str)
+
+
+def dispatch_tool_call(name: str, arguments: Dict[str, Any]) -> Any:
+    """Validate and dispatch a tool call requested by an LLM to the underlying fs_tools function.
+
+    Catches dispatch-level violations (unknown tool, missing arguments, invalid types)
+    and returns structured error dictionaries suitable for LLM self-correction.
+
+    Parameters:
+        name (str): The name of the tool to invoke.
+        arguments (Dict[str, Any]): Dictionary of arguments passed by the LLM.
+
+    Returns:
+        Any: Result dictionary/list returned by the tool, or a structured error dict on failure.
+    """
+    logger.info("Dispatching tool call: name='%s', args=%s", name, arguments)
+
+    if not name or not isinstance(name, str):
+        return {
+            "success": False,
+            "error": "Dispatch error: tool name must be a non-empty string.",
+        }
+
+    if name not in TOOL_REGISTRY:
+        available = ", ".join(sorted(TOOL_REGISTRY.keys()))
+        err = f"Unknown tool '{name}'. Available tools are: {available}."
+        logger.warning("Dispatcher rejected tool name: %s", err)
+        return {"success": False, "error": err}
+
+    if not isinstance(arguments, dict):
+        err = f"Dispatch error: arguments for '{name}' must be a dictionary, got {type(arguments).__name__}."
+        logger.warning(err)
+        return {"success": False, "error": err}
+
+    # Validate required arguments
+    required = REQUIRED_TOOL_ARGS.get(name, [])
+    missing = [param for param in required if param not in arguments or arguments[param] is None]
+    if missing:
+        err = f"Missing required argument(s) for '{name}': {', '.join(missing)}."
+        logger.warning("Dispatcher argument validation failed: %s", err)
+        return {"success": False, "error": err}
+
+    # Dispatch to tool function
+    target_func = TOOL_REGISTRY[name]
+    try:
+        # Pass only accepted arguments to prevent unexpected kwargs
+        import inspect
+        sig = inspect.signature(target_func)
+        valid_kwargs = {k: v for k, v in arguments.items() if k in sig.parameters}
+
+        result = target_func(**valid_kwargs)
+        return result
+
+    except Exception as exc:
+        err = f"Unexpected execution error during dispatch of '{name}': {str(exc)}"
+        logger.exception(err)
+        return {"success": False, "error": err}
+
+
 def run_query(user_query: str) -> str:
     """Execute a single query through the LLM assistant and return the final synthesized answer."""
     raise NotImplementedError("Phase 9 / Phase 11 implementation pending")
